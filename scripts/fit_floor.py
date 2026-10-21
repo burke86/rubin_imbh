@@ -20,22 +20,13 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from rubin_imbh.calib import calibration_groups  # noqa: E402
-from rubin_imbh.varstats import clip_chi2_to_sigma  # noqa: E402
+from rubin_imbh.calib import calibration_groups, rescaled_sig  # noqa: E402
 
 SIG = 5.0
 BANDS = "griz"
 FLOORS = [0.0, 0.005, 0.01, 0.015, 0.02, 0.025, 0.03, 0.04, 0.05]
 MAG_BINS = [-np.inf, 18, 19, 20, 21, 22, 23, 25, np.inf]
 BRIGHT = 21.0  # floor is chosen to flatten the false-positive rate brighter than this
-
-
-def rescaled_sig(x: pd.DataFrame, b: str, s: float) -> np.ndarray:
-    n = x[f"{b}_nEpoch"].to_numpy(dtype=float)
-    r2 = x[f"{b}_rmsErr"].to_numpy(dtype=float) ** 2
-    f2 = (s * x[f"{b}_medFlux"].abs().to_numpy(dtype=float)) ** 2
-    chi2c = x[f"{b}_chi2dofClip"].to_numpy(dtype=float) * (n - 2) * r2 / (r2 + f2)
-    return clip_chi2_to_sigma(chi2c, n)
 
 
 d = pd.read_parquet(sys.argv[1])

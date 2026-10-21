@@ -109,12 +109,40 @@ def selected(st: pd.DataFrame, bands: str, k: int) -> np.ndarray:
     return (n >= k) & st["envClean"].to_numpy(dtype=bool)
 
 
+def floor_scan(st, a, foot, is_agn, chance, ext, floors):
+    """Completeness and X-ray purity vs a common systematic floor, from one floor-free stats run."""
+    from rubin_imbh.calib import rescaled_sig
+
+    rows = {}
+    for s in floors:
+        x = st.copy()
+        for b in "griz":
+            if f"{b}_rmsErr" in x:
+                x[f"{b}_varSigClip"] = rescaled_sig(st, b, s)
+        for name in ("riz >=1", "r", "rz both"):
+            bands, kk = VARIANTS[name]
+            sel = selected(x, bands, kk)
+            hit = np.where(a.st_row >= 0, sel[np.clip(a.st_row, 0, None)], False)
+            m24, m22 = a.rmag <= 24, a.rmag <= 22
+            fs = sel & foot
+            rows[(s, name)] = {
+                "compl r<=22": hit[m22].mean(), "compl r<=24": hit[m24].mean(),
+                "n_sel": int(fs.sum()), "xray_AGN": is_agn[fs].mean() if fs.sum() else np.nan,
+                "xray_AGN_ext": is_agn[fs & ext].mean() if (fs & ext).sum() else np.nan,
+                "n_ext": int((fs & ext).sum()), "chance": chance[fs].mean() if fs.sum() else np.nan,
+            }
+    print("\n=== floor scan (common floor in all bands; rows = floor, variant)")
+    print(pd.DataFrame(rows).T.round(3).to_string())
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--stats", required=True)
     p.add_argument("--object-catalog", default="/rubin/lsdb_data/dp2/object_collection")
     p.add_argument("--match-arcsec", type=float, default=1.5, help="X-ray to optical match radius")
     p.add_argument("--out", help="CSV of selected objects (riz >=1) with X-ray matches")
+    p.add_argument("--floors", help="comma-separated trial floors (fraction of medFlux, all bands) to compare; "
+                   "the stats must be computed with --sys-frac 0, e.g. 0,0.005,0.01,0.015,0.025")
     args = p.parse_args(argv)
     pd.set_option("display.width", 200)
 
@@ -200,6 +228,9 @@ def main(argv=None):
           f"X-ray AGN match rate among all envClean ones: {is_agn[ref].mean():.3f})")
     print(pd.DataFrame(rows).T.round(3).to_string())
     print("xray_AGN is a lower limit on purity; 'chance' is the match rate with X-ray positions shifted by 85\"")
+
+    if args.floors:
+        floor_scan(st, a, foot, is_agn, chance, e, [float(v) for v in args.floors.split(",")])
 
     if args.out:
         sel = selected(st, "riz", 1)
