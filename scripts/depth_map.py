@@ -43,6 +43,7 @@ def per_pixel(df, order, bands, ra_c, dec_c, snr_max):
 
 
 def find_layers(m5: np.ndarray, area: float, min_area_frac: float = 0.005, width: float = 0.1):
+    # min_area_frac is relative to the total mapped area; DDFs (~10-20 deg^2 of ~4000) need ~0.002
     """Peaks of the area-weighted depth histogram (smoothed), as (depth, area deg^2)."""
     m5 = m5[np.isfinite(m5)]
     if len(m5) < 10:
@@ -66,11 +67,21 @@ def main(argv=None):
     p.add_argument("--snr-max", type=float, default=20.0, help="use Objects with S/N below this (sky-limited)")
     p.add_argument("--cone", nargs=3, type=float, metavar=("RA", "DEC", "RADIUS_ARCSEC"), help="for a quick test")
     p.add_argument("--out", required=True, help="output prefix (.parquet and .png are added)")
+    p.add_argument("--from-parquet", action="store_true",
+                   help="reuse <out>.parquet from an earlier run: redo the summary and plot without rescanning")
+    p.add_argument("--min-area-frac", type=float, default=0.002,
+                   help="smallest layer to report, as a fraction of the mapped area")
     p.add_argument("--n-workers", type=int, default=4)
     p.add_argument("--memory-limit", default="20GB")
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     bands = list(args.bands)
+    out = Path(args.out).expanduser()
+    area = 41253.0 / (12 * 4**args.order)
+    if args.from_parquet:
+        px = pd.read_parquet(out.with_suffix(".parquet"))
+        summarize_and_plot(px, bands, area, args, out)
+        return
 
     full = lsdb.open_catalog(UPath(args.catalog))
     allc = list(getattr(full, "all_columns", full.columns))
@@ -104,23 +115,31 @@ def main(argv=None):
         return pd.Series(r)
 
     px = parts.groupby("pix")[[c for c in parts.columns if c != "pix"]].apply(combine).reset_index()
-    area = 41253.0 / (12 * 4**args.order)
     for b in bands:
         with np.errstate(invalid="ignore", divide="ignore"):
             px[f"m5_{b}"] = AB_ZP_NJY - 2.5 * np.log10(5 * px[f"err_{b}"])
         px.loc[px[f"n_{b}"] < 20, f"m5_{b}"] = np.nan  # too few faint Objects for a stable median
-    out = Path(args.out).expanduser()
     px.to_parquet(out.with_suffix(".parquet"))
     logging.info("wrote %d pixels (%.0f deg^2) to %s", len(px), len(px) * area, out.with_suffix(".parquet"))
+    summarize_and_plot(px, bands, area, args, out)
 
+
+def summarize_and_plot(px, bands, area, args, out):
     for b in bands:
         m5 = px[f"m5_{b}"].to_numpy()
-        q = np.nanpercentile(m5, [5, 50, 95])
-        print(f"\n{b}: m5 5/50/95th percentile {q[0]:.2f} / {q[1]:.2f} / {q[2]:.2f} over "
-              f"{np.isfinite(m5).sum() * area:.0f} deg^2")
-        for depth, a in find_layers(m5, area):
+        q = np.nanpercentile(m5, [5, 25, 50, 75, 95, 99])
+        print(f"\n{b}: m5 percentiles 5/25/50/75/95/99: " + " / ".join(f"{v:.2f}" for v in q)
+              + f"  over {np.isfinite(m5).sum() * area:.0f} deg^2")
+        for depth, a in find_layers(m5, area, min_area_frac=args.min_area_frac):
             print(f"   layer near m5 = {depth:.2f}: ~{a:.0f} deg^2")
+        thr = np.arange(np.floor(q[2] * 4) / 4, np.nanmax(m5) + 0.25, 0.25)
+        cum = ", ".join(f">{t:.2f}: {np.sum(m5 > t) * area:.0f}" for t in thr)
+        print(f"   area deeper than m5 (deg^2): {cum}")
+    ra_c = next(c for c in ("coord_ra", "ra") if c in px)
+    dec_c = next(c for c in ("coord_dec", "dec") if c in px)
+    _plot(px, bands, area, out, ra_c, dec_c)
 
+def _plot(px, bands, area, out, ra_c, dec_c):
     import matplotlib
 
     matplotlib.use("Agg")
