@@ -203,6 +203,21 @@ def test_clipped_significance_ignores_single_glitch():
     assert summarize(st, Cuts(robust=False)).isVariable[hit].mean() > 0.9
 
 
+def test_per_band_sys_frac_suppresses_bright_floor():
+    """A brightness-proportional extra scatter is absorbed by a matching per-band floor."""
+    base, lc = mock_dia(n_const=600, n_var=0, seed=7)
+    lc = lc[~lc.psfDiffFlux_flag].copy()
+    rng = np.random.default_rng(8)
+    gband = (lc.band == "g").to_numpy()
+    lc.loc[gband, "psfDiffFlux"] += rng.normal(0, 0.10 * lc.loc[gband, "psfFlux"].abs())  # >> 3% mock errors
+    obj = lc.index.to_numpy()
+    st0 = lightcurve_stats(obj, lc, len(base), COLS, Cuts())
+    st1 = lightcurve_stats(obj, lc, len(base), COLS, Cuts(sys_frac={"g": 0.10}))
+    assert (st0.g_varSigClip > 5).mean() > 0.5  # floor unmodelled: mostly "variable"
+    assert (st1.g_varSigClip > 5).mean() < 0.02  # modelled per band
+    assert np.allclose(st0.r_varSigClip, st1.r_varSigClip, equal_nan=True)  # other bands untouched
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

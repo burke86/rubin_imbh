@@ -52,7 +52,9 @@ class Cuts:
     min_sig: float = 5.0  # chi^2 significance (Gaussian sigma) for "variable" in a band
     min_bands: int = 1  # number of bands that must pass min_sig
     err_scale: float = 1.0  # multiplicative error rescaling (calibrate on a test field)
-    sys_frac: float = 0.0  # systematic floor as a fraction of |direct-image flux|
+    # systematic floor as a fraction of |direct-image flux|, added in quadrature per epoch;
+    # a float for all bands or a {band: frac} dict (ECDFS: ~0.03 in g, ~0.02 in riz)
+    sys_frac: float | dict[str, float] = 0.0
     # bands that count toward selection; stats are still computed for all of BANDS.
     # u and y have ~10 epochs in DP2 and showed no variable/reference separation (ECDFS)
     select_bands: tuple[str, ...] = tuple("griz")
@@ -113,6 +115,13 @@ def clip_chi2_to_sigma(chi2_clip: np.ndarray, n: np.ndarray) -> np.ndarray:
     return np.where(ok, z, np.nan)
 
 
+def band_floor(sys_frac: float | dict[str, float], band: np.ndarray) -> np.ndarray:
+    """Per-epoch systematic floor fraction from a scalar or a per-band mapping."""
+    if isinstance(sys_frac, dict):
+        return pd.Series(band).map(sys_frac).fillna(0.0).to_numpy(dtype=float)
+    return np.full(len(band), float(sys_frac))
+
+
 def good_epoch_mask(flat: pd.DataFrame, cols: Columns, flags: tuple[str, ...]) -> np.ndarray:
     f = flat[cols.flux].to_numpy(dtype=float, na_value=np.nan)
     e = flat[cols.flux_err].to_numpy(dtype=float, na_value=np.nan)
@@ -150,14 +159,16 @@ def lightcurve_stats(
     f = flat[cols.flux].to_numpy(dtype=float, na_value=np.nan)[good]
     e = cuts.err_scale * flat[cols.flux_err].to_numpy(dtype=float, na_value=np.nan)[good]
     s = flat[cols.sci_flux].to_numpy(dtype=float, na_value=np.nan)[good]
-    if cuts.sys_frac > 0:
-        e = np.hypot(e, cuts.sys_frac * np.nan_to_num(np.abs(s)))
+    band = flat[cols.band].to_numpy()[good]
+    floor = band_floor(cuts.sys_frac, band)
+    if np.any(floor > 0):
+        e = np.hypot(e, floor * np.nan_to_num(np.abs(s)))
     e2 = e**2
     w = 1.0 / e2
     df = pd.DataFrame(
         {
             "obj": obj[good],
-            "band": flat[cols.band].to_numpy()[good],
+            "band": band,
             "f": f,
             "e2": e2,
             "s": s,

@@ -12,6 +12,7 @@ CC-IN2P3), so the pipeline runs there; it is tested locally on mock catalogs.
 - `rubin_imbh/pipeline.py` — LSDB wrapper: schema check, coarse cut, `map_partitions`
 - `scripts/select_variables.py` — CLI (`inspect`, `tiles`, `run`)
 - `scripts/diagnose_cone.py` — false-positive diagnostics for a calibration cone
+- `scripts/fit_floor.py` — per-band `--sys-frac` from a calibration cone, without rerunning
 - `scripts/simulate_clip_null.py` — regenerates the null table for `varSigClip`
 - `tests/test_pipeline.py` — mock-data tests (`python tests/test_pipeline.py`)
 
@@ -41,7 +42,20 @@ have median χ²/dof 3–7 in g/i. The reference group's heavy upper tail (mean 
 is what motivated the clipped statistic. With `--err-scale 1.07` the reference median is
 0.96–1.00, but 7–15% of reference objects still exceed 5σ after clipping (≈10⁴ variables
 per deg² in total, far above expectations), i.e. a multi-epoch systematic remains;
-`scripts/diagnose_cone.py` splits this by brightness to set `--sys-frac`. ECDFS is a deep-drilling field; wide-survey areas
+`scripts/diagnose_cone.py` splits this by brightness to set `--sys-frac`.
+
+v3 (`diagnose_cone.py`): the reference 5σ fraction climbs from ~10% at 22–25 mag to 100%
+brighter than ~19 mag, and the flagged bright objects have `fvar` ≈ 3% (g) and 1.5–2.5%
+(riz): a brightness-proportional floor from subtraction residuals, larger in g (DCR). The
+>5-detection group shows the same `fvar` ≲ 1% at the bright end, so many bright
+DiaObjects exist because of these residuals. `scripts/fit_floor.py` picks per-band floors
+from the same parquet. Separately, i band at 21–23 mag has reference median χ²/dof ≈ 1.6,
+which a flux-proportional floor cannot fix; possibly correlated same-night visits in the
+deep-drilling sequences (to check by nightly binning).
+
+A floor of a few percent of the *total* direct-image flux limits sensitivity to low-amplitude,
+host-diluted variability, which is exactly the dwarf-AGN regime, so keep it as low as the
+data allow. ECDFS is a deep-drilling field; wide-survey areas
 have far fewer epochs, so revisit `--min-epochs` there.
 
 `excessVar` is diluted by host light because `psfFlux` includes the galaxy, which

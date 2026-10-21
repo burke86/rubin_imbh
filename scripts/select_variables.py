@@ -32,7 +32,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rubin_imbh.pipeline import needed_columns, nested_fields, select_variables, tile_pixels  # noqa: E402
 from rubin_imbh.varstats import Columns, Cuts  # noqa: E402
 
-DEFAULT_CATALOG = "/rubin/lsdb_data/dia_object_collection"
+DEFAULT_CATALOG = "/rubin/lsdb_data/dp2/dia_object_collection"
+
+
+def parse_sys_frac(text: str):
+    """``0.02`` for all bands, or ``g=0.03,r=0.02,i=0.02,z=0.02`` per band."""
+    if "=" not in text:
+        return float(text)
+    return {k.strip(): float(v) for k, v in (item.split("=") for item in text.split(","))}
 
 
 def open_dia(path: str, cone=None, columns=None):
@@ -181,7 +188,8 @@ def main(argv=None):
     r.add_argument("--min-sig", type=float, default=Cuts.min_sig)
     r.add_argument("--min-bands", type=int, default=Cuts.min_bands)
     r.add_argument("--err-scale", type=float, default=Cuts.err_scale)
-    r.add_argument("--sys-frac", type=float, default=Cuts.sys_frac)
+    r.add_argument("--sys-frac", type=parse_sys_frac, default=Cuts.sys_frac,
+                   help="error floor as a fraction of direct-image flux: 0.02 or g=0.03,r=0.02,...")
     r.add_argument("--select-bands", default="".join(Cuts.select_bands), help="bands that count toward selection")
     r.add_argument("--no-robust", action="store_true", help="select on varSig instead of varSigClip")
     r.add_argument("--lc-column", default=Columns.lc)
