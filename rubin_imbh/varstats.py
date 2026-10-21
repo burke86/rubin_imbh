@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 BANDS = tuple("ugrizy")
-STATS = ("nEpoch", "chi2dof", "varSig", "chi2dofClip", "varSigClip", "excessVar", "fvar")
+STATS = ("nEpoch", "medFlux", "rmsErr", "chi2dof", "varSig", "chi2dofClip", "varSigClip", "excessVar", "fvar")
 
 
 @dataclass(frozen=True)
@@ -71,6 +71,46 @@ def chi2_to_sigma(chi2: np.ndarray, dof: np.ndarray) -> np.ndarray:
         a = 2.0 / (9.0 * dof)
         z = (np.cbrt(chi2 / dof) - (1.0 - a)) / np.sqrt(a)
     return np.where(dof > 0, z, np.nan)
+
+
+# Null distribution of the leave-one-out statistic. Dropping the most deviant epoch
+# biases chi^2 low, so (chi^2_clip / (n-2))^(1/3) is standardized with its simulated
+# mean and sd for Gaussian noise (scripts/simulate_clip_null.py). Calibrated to
+# |mean| < 0.03, sd within 1% of unity and Gaussian 3-4 sigma tails for 8 <= n <= 400,
+# with unequal errors.
+_CLIP_N = np.array([4, 5, 6, 7, 9, 10, 13, 15, 19, 22, 27, 33, 40, 48, 59, 71, 86, 104, 126, 153, 186, 225, 273, 330, 400])
+_CLIP_MEAN = np.array([0.6246, 0.7078, 0.7566, 0.7873, 0.8275, 0.8427, 0.8736, 0.8868, 0.9056, 0.9167, 0.9283, 0.9385, 0.9466, 0.9542, 0.9617, 0.9663, 0.9712, 0.9752, 0.9788, 0.9813, 0.9847, 0.9868, 0.9885, 0.9905, 0.9918])
+_CLIP_SD = np.array([0.247, 0.22, 0.1985, 0.1828, 0.1596, 0.1519, 0.131, 0.1217, 0.1081, 0.1005, 0.0899, 0.0818, 0.0742, 0.0673, 0.0609, 0.0554, 0.0506, 0.0458, 0.0415, 0.0381, 0.0341, 0.0313, 0.0286, 0.026, 0.0235])
+
+
+def _clip_null_moments(n: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Mean and sd of the cube-root leave-one-out statistic under the null, for n epochs."""
+    n = np.asarray(n, dtype=float)
+    mean = np.interp(np.log(n), np.log(_CLIP_N), _CLIP_MEAN)
+    sd = np.interp(np.log(n), np.log(_CLIP_N), _CLIP_SD)
+    big = n > _CLIP_N[-1]
+    if big.any():
+        # Wilson-Hilferty for n-2 dof, minus the dropped epoch (~ expected max of n chi^2_1
+        # values), scaled to match the simulated table at its last point
+        def asym(m):
+            d = m - 2.0
+            return 1.0 - 2.0 / (9.0 * d) - (2.0 * np.log(m) - np.log(np.log(m))) / (3.0 * d)
+
+        nb = n[big]
+        mean[big] = asym(nb) + (_CLIP_MEAN[-1] - asym(_CLIP_N[-1]))
+        sd[big] = np.sqrt(2.0 / (9.0 * (nb - 2.0)))
+    return mean, sd
+
+
+def clip_chi2_to_sigma(chi2_clip: np.ndarray, n: np.ndarray) -> np.ndarray:
+    """Gaussian-equivalent significance of a leave-one-out chi^2 from n epochs (n >= 4)."""
+    chi2_clip = np.asarray(chi2_clip, dtype=float)
+    n = np.asarray(n, dtype=float)
+    ok = n >= _CLIP_N[0]
+    nn = np.where(ok, n, _CLIP_N[0])
+    mean, sd = _clip_null_moments(nn)
+    z = (np.cbrt(chi2_clip / (nn - 2.0)) - mean) / sd
+    return np.where(ok, z, np.nan)
 
 
 def good_epoch_mask(flat: pd.DataFrame, cols: Columns, flags: tuple[str, ...]) -> np.ndarray:
@@ -160,10 +200,12 @@ def lightcurve_stats(
         out = pd.DataFrame(
             {
                 "nEpoch": agg["n"].to_numpy(),
+                "medFlux": agg["med_s"].to_numpy(),  # direct-image flux [nJy], includes host
+                "rmsErr": np.sqrt(agg["mean_e2"].to_numpy()),  # after err_scale / sys_frac
                 "chi2dof": np.where(dof > 0, chi2 / dof, np.nan),
                 "varSig": chi2_to_sigma(chi2, dof),
                 "chi2dofClip": np.where(dof_c > 0, chi2_c / dof_c, np.nan),
-                "varSigClip": chi2_to_sigma(chi2_c, dof_c),
+                "varSigClip": clip_chi2_to_sigma(chi2_c, n),
                 "excessVar": xs,
                 "fvar": np.sqrt(np.clip(xs, 0.0, None)),
             },

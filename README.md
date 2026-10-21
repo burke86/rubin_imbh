@@ -11,6 +11,8 @@ CC-IN2P3), so the pipeline runs there; it is tested locally on mock catalogs.
 - `rubin_imbh/varstats.py` — per-object, per-band statistics (pure pandas, vectorized)
 - `rubin_imbh/pipeline.py` — LSDB wrapper: schema check, coarse cut, `map_partitions`
 - `scripts/select_variables.py` — CLI (`inspect`, `tiles`, `run`)
+- `scripts/diagnose_cone.py` — false-positive diagnostics for a calibration cone
+- `scripts/simulate_clip_null.py` — regenerates the null table for `varSigClip`
 - `tests/test_pipeline.py` — mock-data tests (`python tests/test_pipeline.py`)
 
 ## Statistics (per band, on good forced-photometry epochs)
@@ -18,9 +20,10 @@ CC-IN2P3), so the pipeline runs there; it is tested locally on mock catalogs.
 | column | meaning |
 |---|---|
 | `{b}_nEpoch` | epochs passing flag cuts |
+| `{b}_medFlux`, `{b}_rmsErr` | median direct-image flux (nJy, includes host) and rms per-epoch error after rescaling |
 | `{b}_chi2dof` | χ²/dof of `psfDiffFlux` about its weighted mean |
 | `{b}_varSig` | Gaussian-equivalent significance of that χ² (Wilson–Hilferty) |
-| `{b}_chi2dofClip`, `{b}_varSigClip` | same with the single most deviant epoch removed (exact leave-one-out) |
+| `{b}_chi2dofClip`, `{b}_varSigClip` | same with the single most deviant epoch removed (exact leave-one-out); `varSigClip` is standardized against the simulated null of this statistic (`scripts/simulate_clip_null.py`), since dropping the largest residual biases χ² low |
 | `{b}_excessVar` | (var − ⟨σ²⟩) / median(`psfFlux`)², normalized by direct-image flux |
 | `{b}_fvar` | √excessVar (fractional rms) |
 | `nVarBands`, `maxVarSig`, `isVariable` | over `--select-bands` (default `griz`): bands with `varSigClip ≥ min_sig` and `nEpoch ≥ min_epochs` |
@@ -35,7 +38,10 @@ by default: in DP2 they have ~10 epochs and showed no variable/reference separat
 DIA detections (reference) have median χ²/dof 1.10–1.15 in griz against ~0.985 expected,
 so errors are underestimated by ~7%: use `--err-scale 1.07`. Objects with ≥3 detections
 have median χ²/dof 3–7 in g/i. The reference group's heavy upper tail (mean ≫ median)
-is what motivated the clipped statistic. ECDFS is a deep-drilling field; wide-survey areas
+is what motivated the clipped statistic. With `--err-scale 1.07` the reference median is
+0.96–1.00, but 7–15% of reference objects still exceed 5σ after clipping (≈10⁴ variables
+per deg² in total, far above expectations), i.e. a multi-epoch systematic remains;
+`scripts/diagnose_cone.py` splits this by brightness to set `--sys-frac`. ECDFS is a deep-drilling field; wide-survey areas
 have far fewer epochs, so revisit `--min-epochs` there.
 
 `excessVar` is diluted by host light because `psfFlux` includes the galaxy, which

@@ -74,6 +74,24 @@ def write_hats(nf, path, rows):
     cat.to_hats(path, catalog_name=Path(path).name)
 
 
+def test_clip_null_is_standard_normal():
+    from rubin_imbh.varstats import clip_chi2_to_sigma
+
+    rng = np.random.default_rng(5)
+    for n in (8, 40, 120, 800):  # 800 exercises the large-n extrapolation
+        e = rng.uniform(0.5, 2.0, (20000, n))
+        f = rng.standard_normal(e.shape) * e
+        w = 1 / e**2
+        mu = (w * f).sum(1, keepdims=True) / w.sum(1, keepdims=True)
+        k = (w * (f - mu) ** 2).argmax(1)
+        keep = np.ones_like(f, bool)
+        keep[np.arange(len(f)), k] = False
+        fc, wc = f[keep].reshape(len(f), n - 1), w[keep].reshape(len(f), n - 1)
+        muc = (wc * fc).sum(1, keepdims=True) / wc.sum(1, keepdims=True)
+        z = clip_chi2_to_sigma((wc * (fc - muc) ** 2).sum(1), np.full(len(f), n))
+        assert abs(z.mean()) < 0.06 and abs(z.std() - 1) < 0.06, (n, z.mean(), z.std())
+
+
 def test_chi2_to_sigma_null():
     rng = np.random.default_rng(1)
     dof = 29
@@ -91,6 +109,10 @@ def test_stats_recover_variables():
     const = ~base.truth_var.to_numpy()
     # null population is well calibrated once flagged epochs are dropped
     assert abs(np.nanmedian(st.loc[const, "r_chi2dof"]) - 1) < 0.1
+    # ...and the leave-one-out significance is standardized despite its low bias
+    zc = st.loc[const, "r_varSigClip"]
+    assert abs(zc.mean()) < 0.1 and abs(zc.std() - 1) < 0.1
+    assert (st.loc[const, "r_chi2dofClip"].median() < 0.95)  # raw clipped chi2 is biased low
     assert summ.isVariable[const].mean() < 0.005
     assert summ.isVariable[~const].all()
     fvar = st.loc[~const, "r_fvar"]
