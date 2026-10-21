@@ -245,6 +245,49 @@ def test_visit_offsets_are_recovered_and_removed():
     assert raw[("r", "all", "-inf-21")] > 0.9 and cor[("r", "all", "-inf-21")] < 0.02
 
 
+def test_environment_match_and_bright_star_flag():
+    """Variables are matched to Objects within 1" and flagged within 10" of bright stars."""
+    import inspect
+
+    import lsdb
+    import nested_pandas as npd
+
+    if "how" not in inspect.signature(lsdb.catalog.Catalog.crossmatch).parameters:
+        print("  (skipped: needs lsdb >= 0.10)")
+        return
+    from rubin_imbh.environment import add_environment, bright_star_catalog, resolve_object_columns
+    from rubin_imbh.pipeline import select_variables
+
+    base, lc = mock_dia(n_const=0, n_var=40, seed=9)
+    nf = npd.NestedFrame(base).add_nested(lc, "diaObjectForcedSource")
+    # Objects at the first 30 DiaObjects (the last 10 are "hostless"); bright stars 5" from
+    # objects 0-4 and 30" from objects 5-9
+    o = base.iloc[:30]
+    objects = pd.DataFrame({"objectId": np.arange(30) + 1000, "coord_ra": o.ra.to_numpy() + 0.1 / 3600,
+                            "coord_dec": o.dec.to_numpy(), "refExtendedness": 1.0, "r_psfFlux": 1e3})
+    cosd = np.cos(np.deg2rad(base.dec.to_numpy()[:10]))
+    off = np.r_[np.full(5, 5.0), np.full(5, 30.0)] / 3600 / cosd
+    stars = pd.DataFrame({"coord_ra": base.ra.to_numpy()[:10] + off, "coord_dec": base.dec.to_numpy()[:10]})
+    with tempfile.TemporaryDirectory() as tmp:
+        write_hats(nf, Path(tmp) / "dia", rows=100)
+        lsdb.from_dataframe(objects, ra_column="coord_ra", dec_column="coord_dec", lowest_order=2,
+                            highest_order=9).to_hats(Path(tmp) / "obj", catalog_name="obj")
+        dia = lsdb.open_catalog(Path(tmp) / "dia")
+        obj = lsdb.open_catalog(Path(tmp) / "obj")
+        oc = resolve_object_columns(obj)
+        bright = bright_star_catalog(stars, oc, margin_arcsec=15.0)
+        sel = select_variables(dia, COLS, Cuts(min_dia_sources=0))
+        res = add_environment(sel, obj, oc, bright, veto_arcsec=10.0).compute().set_index("diaObjectId")
+        assert set(res.index) == set(range(30))  # hostless dropped
+        assert (res.objectId == res.index + 1000).all() and (res.objSep < 0.2).all()
+        near = res.brightStarDist.notna()
+        assert set(res.index[near]) == set(range(5))  # 5" stars flagged, 30" ones not
+        assert np.allclose(res.loc[near, "brightStarDist"], 5.0, atol=0.2)
+        assert res.envClean.sum() == 25 and "diaObjectForcedSource" in res.columns
+        kept = add_environment(sel, obj, oc, bright, keep_unmatched=True).compute()
+        assert len(kept) == 40 and kept.objSep.isna().sum() == 10 and not kept.envClean[kept.objSep.isna()].any()
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

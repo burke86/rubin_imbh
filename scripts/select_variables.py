@@ -26,6 +26,7 @@ from pathlib import Path
 
 import hats
 import lsdb
+import pandas as pd
 from upath import UPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -98,11 +99,12 @@ def cmd_run(args):
         logging.info("loading columns: %s", columns)
         cat = open_dia(args.catalog, args.cone, columns)
         out = Path(args.out).expanduser()
+        env = load_environment(args, out) if args.object_catalog else None
 
         if args.tile_order is None:
             tile = tuple(args.tile) if args.tile else None
             dest = out / f"o{tile[0]}_p{tile[1]}" if tile else out
-            run_one(cat, cols, cuts, args, dest, tile)
+            run_one(cat, cols, cuts, args, dest, tile, env)
             return
 
         tiles = tile_pixels(cat, args.tile_order)
@@ -113,13 +115,55 @@ def cmd_run(args):
                 logging.info("[%d/%d] %s already done, skipping", i, len(tiles), dest.name)
                 continue
             logging.info("[%d/%d] %s", i, len(tiles), dest.name)
-            run_one(cat, cols, cuts, args, dest, (args.tile_order, pix))
+            run_one(cat, cols, cuts, args, dest, (args.tile_order, pix), env)
 
 
 DONE = "_DONE"
 
 
-def run_one(cat, cols, cuts, args, dest: Path, tile):
+def load_environment(args, out: Path):
+    """Object catalog plus a bright-star catalog with a margin wider than the veto radius.
+
+    Bright stars are computed once (restricted to the cone, padded by the veto radius, when
+    --cone is given) and cached as parquet so tiled runs and reruns reuse them.
+    """
+    from rubin_imbh.environment import (
+        bright_star_catalog,
+        bright_stars,
+        require_crossmatch_support,
+        resolve_object_columns,
+    )
+
+    require_crossmatch_support()
+    oc = resolve_object_columns(lsdb.open_catalog(UPath(args.object_catalog)))
+    objects = lsdb.open_catalog(UPath(args.object_catalog), columns=oc.load)
+    logging.info("object columns: %s", oc)
+
+    cache = Path(args.bright_stars).expanduser() if args.bright_stars else None
+    if cache is None:
+        base = out.parent if out.suffix == ".parquet" else out
+        tag = f"_cone{args.cone[0]:g}_{args.cone[1]:g}_{args.cone[2]:g}" if args.cone else ""
+        cache = base / f"bright_stars_r{args.bright_star_mag:g}{tag}.parquet"
+    if cache.exists():
+        stars = pd.read_parquet(cache)
+        logging.info("read %d bright stars from %s", len(stars), cache)
+    else:
+        src = objects
+        if args.cone:
+            pad = args.cone[2] + 2 * args.veto_arcsec
+            src = lsdb.open_catalog(UPath(args.object_catalog), columns=oc.load,
+                                    search_filter=lsdb.ConeSearch(ra=args.cone[0], dec=args.cone[1], radius_arcsec=pad))
+        logging.info("computing r < %g point sources from %s (one pass over the object catalog)",
+                     args.bright_star_mag, args.object_catalog)
+        stars = bright_stars(src, oc, args.bright_star_mag)
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        stars.to_parquet(cache)
+        logging.info("cached %d bright stars to %s", len(stars), cache)
+    bright = bright_star_catalog(stars, oc, margin_arcsec=args.veto_arcsec + 5.0)
+    return dict(objects=objects, oc=oc, bright=bright)
+
+
+def run_one(cat, cols, cuts, args, dest: Path, tile, env=None):
     """Run one region and write it to ``dest``: a .parquet file, or a HATS directory.
 
     In tile mode ``dest`` is a directory holding the output plus a ``_DONE`` marker,
@@ -128,6 +172,11 @@ def run_one(cat, cols, cuts, args, dest: Path, tile):
     result = select_variables(cat, cols, cuts, select=not args.no_select, tile=tile)
     if args.no_select or args.stats_only:
         result = result[[c for c in result.columns if c not in cat.nested_columns]]
+    if env is not None:
+        from rubin_imbh.environment import add_environment
+
+        result = add_environment(result, env["objects"], env["oc"], env["bright"], match_arcsec=args.match_arcsec,
+                                 veto_arcsec=args.veto_arcsec, keep_unmatched=args.keep_unmatched)
 
     if tile is None and dest.suffix == ".parquet":
         df = result.compute()
@@ -195,6 +244,13 @@ def main(argv=None):
     r.add_argument("--lc-column", default=Columns.lc)
     r.add_argument("--flux-column", default=Columns.flux, help="error column is <name>Err")
     r.add_argument("--sci-flux-column", default=Columns.sci_flux)
+    r.add_argument("--object-catalog", help="object_collection path: match to coadd Objects and flag bright-star "
+                   "neighbourhoods (e.g. /rubin/lsdb_data/dp2/object_collection; needs lsdb >= 0.10)")
+    r.add_argument("--match-arcsec", type=float, default=1.0, help="DiaObject-Object match radius")
+    r.add_argument("--keep-unmatched", action="store_true", help="keep variables with no Object match (objSep NaN)")
+    r.add_argument("--veto-arcsec", type=float, default=10.0, help="bright-star neighbourhood radius")
+    r.add_argument("--bright-star-mag", type=float, default=18.0, help="r-band limit for veto stars")
+    r.add_argument("--bright-stars", help="bright-star parquet cache (default: next to --out)")
     r.add_argument("--n-workers", type=int, default=4)
     r.add_argument("--memory-limit", default="6GB", help="per worker")
 

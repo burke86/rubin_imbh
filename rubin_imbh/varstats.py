@@ -56,8 +56,9 @@ class Cuts:
     # a float for all bands or a {band: frac} dict (ECDFS: ~0.03 in g, ~0.02 in riz)
     sys_frac: float | dict[str, float] = 0.0
     # bands that count toward selection; stats are still computed for all of BANDS.
-    # u and y have ~10 epochs in DP2 and showed no variable/reference separation (ECDFS)
-    select_bands: tuple[str, ...] = tuple("griz")
+    # ECDFS: u and y have ~10 epochs and no variable/reference separation; g has a
+    # colour-dependent airmass systematic (DCR or second-order extinction)
+    select_bands: tuple[str, ...] = tuple("riz")
     robust: bool = True  # select on varSigClip (most deviant epoch dropped) instead of varSig
 
 

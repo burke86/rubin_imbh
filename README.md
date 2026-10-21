@@ -29,7 +29,7 @@ CC-IN2P3), so the pipeline runs there; it is tested locally on mock catalogs.
 | `{b}_chi2dofClip`, `{b}_varSigClip` | same with the single most deviant epoch removed (exact leave-one-out); `varSigClip` is standardized against the simulated null of this statistic (`scripts/simulate_clip_null.py`), since dropping the largest residual biases χ² low |
 | `{b}_excessVar` | (var − ⟨σ²⟩) / median(`psfFlux`)², normalized by direct-image flux |
 | `{b}_fvar` | √excessVar (fractional rms) |
-| `nVarBands`, `maxVarSig`, `isVariable` | over `--select-bands` (default `griz`): bands with `varSigClip ≥ min_sig` and `nEpoch ≥ min_epochs` |
+| `nVarBands`, `maxVarSig`, `isVariable` | over `--select-bands` (default `riz`): bands with `varSigClip ≥ min_sig` and `nEpoch ≥ min_epochs` |
 
 Selection uses the clipped significance so a single unflagged bad epoch cannot make an
 object variable (`--no-robust` reverts to `varSig`). u and y are computed but do not count
@@ -85,6 +85,21 @@ few outlier epochs.
   plausibly colour-dependent (DCR or second-order extinction).
 - **Tails**: the top 10% of objects carry ~89% of 4σ outliers; removing all |z|>4 epochs
   rescues only 20–42% of flags.
+
+Cut sequence on ECDFS (reference false positives per deg², single band, 5σ):
+
+| band | all | + bright-star veto (10″) | + Object within 1″ | extended only |
+|---|---|---|---|---|
+| g | 3855 | 2427 | 215 | 126 (7.5%) |
+| r | 2203 | 998 | 74 | 36 (2.1%) |
+| i | 3691 | 2298 | 237 | 70 (4.1%) |
+| z | 1867 | 775 | 65 | 13 (0.8%) |
+
+The Object match is the biggest lever and removes most of the faint g/i excess. In g the
+sign of corr(z, airmass) follows g−i colour (Spearman 0.33 for flagged objects; blue
+objects flagged 12% vs red 3%), so g is excluded from selection by default. In i, bright
+(19–21 mag) point sources are still flagged 20% vs 7% for extended objects, with no colour
+trend; possibly a PSF/brightness residual.
 
 A floor of a few percent of the *total* direct-image flux limits sensitivity to low-amplitude,
 host-diluted variability, which is exactly the dwarf-AGN regime, so keep it as low as the
@@ -155,6 +170,17 @@ python scripts/select_variables.py --catalog $CAT tiles --order 3     # preview
 python scripts/select_variables.py --catalog $CAT run --err-scale 1.07 \
     --tile-order 3 --n-workers 8 --out ~/rubin_imbh/dp2_variables
 ```
+
+### Environment cuts (`--object-catalog`, lsdb >= 0.10)
+
+With `--object-catalog /rubin/lsdb_data/dp2/object_collection`, selected objects are
+crossmatched to the nearest coadd Object within `--match-arcsec` (default 1″; unmatched
+objects are dropped unless `--keep-unmatched`), and to r < `--bright-star-mag` (18) point
+sources within `--veto-arcsec` (10″). Added columns: `objSep`, the Object's id,
+extendedness and `{band}_psfFlux`, `brightStarDist` (NaN if no bright star within the veto
+radius) and `envClean`. Bright stars are pulled once into a small in-memory catalog with a
+margin wider than the veto radius (the veto exceeds object_collection's margin) and cached
+as `bright_stars_r18*.parquet` next to `--out`.
 
 ### Tiling
 
