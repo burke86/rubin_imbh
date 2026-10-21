@@ -107,6 +107,9 @@ def cmd_run(args):
         sys_frac=args.sys_frac,
         select_bands=tuple(args.select_bands),
         robust=not args.no_robust,
+        combo_bands=tuple(args.combo_bands),
+        combined=args.combined,
+        min_combo_dof=args.min_combo_dof,
     )
     logging.info("source: %s   catalog: %s", args.source, args.catalog)
     logging.info("columns: %s", cols)
@@ -284,6 +287,12 @@ def main(argv=None):
                    help="error floor as a fraction of direct-image flux: 0.02 or g=0.03,r=0.02,...")
     r.add_argument("--select-bands", default="".join(Cuts.select_bands), help="bands that count toward selection")
     r.add_argument("--no-robust", action="store_true", help="select on varSig instead of varSigClip")
+    r.add_argument("--combo-bands", default="".join(Cuts.combo_bands),
+                   help="bands in the combined-band chi^2 for sparse (WFD) light curves")
+    r.add_argument("--combined", choices=["either", "only", "off"], default=Cuts.combined,
+                   help="either: per-band OR combined criterion; only: combined; off: per band only")
+    r.add_argument("--min-combo-dof", type=int, default=Cuts.min_combo_dof,
+                   help="minimum sum over combo bands of (epochs - 1)")
     r.add_argument("--lc-column", help="nested light-curve column (default: auto-detected)")
     r.add_argument("--flux-column", help=f"default {DIA.flux}; error column is <name>Err")
     r.add_argument("--sci-flux-column", help=f"default {DIA.sci_flux}")

@@ -44,6 +44,18 @@ for b in BANDS:
     print(f"\n=== {b}-band (nEpoch >= 10: {len(x)}; mag from median direct-image flux)")
     print(t[t.n >= 20].round(3).to_string())
 
+if "all_varSigClip" in d:
+    x = d[d["all_dof"] >= 4].copy()
+    ref_b = "r" if "r_medFlux" in x else "i"
+    with np.errstate(invalid="ignore", divide="ignore"):
+        x["mag"] = 31.4 - 2.5 * np.log10(x[f"{ref_b}_medFlux"])
+    x["magbin"] = pd.cut(x["mag"], MAG_BINS)
+    x["var"] = x["all_varSigClip"] >= SIG
+    t = x.groupby(["grp", "magbin"], observed=True).agg(
+        n=("var", "size"), frac5=("var", "mean"), med_chi2=("all_chi2dof", "median"), med_dof=("all_dof", "median"))
+    print(f"\n=== combined-band statistic (all_dof >= 4: {len(x)}; mag from {ref_b}-band median direct-image flux)")
+    print(t[t.n >= 20].round(3).to_string())
+
 print("\nisVariable by group:")
 print(d.groupby("grp", observed=True).isVariable.agg(["size", "sum", "mean"]).round(3).to_string())
 print("\nnVarBands among variables:")

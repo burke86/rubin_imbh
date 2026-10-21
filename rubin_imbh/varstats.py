@@ -7,6 +7,7 @@ applied partition-by-partition with ``Catalog.map_partitions``.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 import numpy as np
 import pandas as pd
@@ -69,6 +70,12 @@ class Cuts:
     # colour-dependent airmass systematic (DCR or second-order extinction)
     select_bands: tuple[str, ...] = tuple("riz")
     robust: bool = True  # select on varSigClip (most deviant epoch dropped) instead of varSig
+    # Combined-band statistic for sparse light curves (DP2 WFD: ~2/4/3 epochs in r/i/z):
+    # one chi^2 over all epochs in combo_bands about per-band means. "either": variable if
+    # the per-band OR the combined criterion passes; "only": combined only; "off": per band.
+    combo_bands: tuple[str, ...] = tuple("riz")
+    combined: str = "either"
+    min_combo_dof: int = 4  # sum over combo bands of (n_b - 1)
 
 
 def chi2_to_sigma(chi2: np.ndarray, dof: np.ndarray) -> np.ndarray:
@@ -123,6 +130,66 @@ def clip_chi2_to_sigma(chi2_clip: np.ndarray, n: np.ndarray) -> np.ndarray:
     mean, sd = _clip_null_moments(nn)
     z = (np.cbrt(chi2_clip / (nn - 2.0)) - mean) / sd
     return np.where(ok, z, np.nan)
+
+
+COMBO_SIM_MAX_EPOCHS = 60  # above this, the single-band table is used (split barely matters)
+
+
+@lru_cache(maxsize=None)
+def _combo_null_moments(split: tuple[int, ...], draws: int = 40_000) -> tuple[float, float]:
+    """Null mean/sd of (chi2_clip / (dof - 1))^(1/3) for a band split, by simulation.
+
+    chi2 is summed over bands about each band's own mean; the single epoch with the largest
+    normalized residual over all bands is removed (exact leave-one-out within its band).
+    Equal weights; the single-band case showed unequal errors do not matter.
+    """
+    rng = np.random.default_rng(abs(hash(split)) % 2**32)
+    chi2 = np.zeros(draws)
+    best = np.full(draws, -1.0)
+    drop = np.zeros(draws)
+    for n in split:
+        z = rng.standard_normal((draws, n))
+        r2 = (z - z.mean(1, keepdims=True)) ** 2
+        chi2 += r2.sum(1)
+        k = r2.argmax(1)
+        rk = r2[np.arange(draws), k]
+        eff = rk * n / (n - 1) if n > 1 else np.zeros(draws)
+        upd = rk > best
+        best = np.where(upd, rk, best)
+        drop = np.where(upd, eff, drop)
+    dof = sum(n - 1 for n in split)
+    y = np.cbrt(np.maximum(chi2 - drop, 0.0) / (dof - 1))
+    return float(y.mean()), float(y.std())
+
+
+def combo_clip_sigma(chi2_clip: np.ndarray, counts: np.ndarray, min_dof_clip: int = 3) -> np.ndarray:
+    """Gaussian-equivalent significance of a combined-band leave-one-out chi^2.
+
+    ``counts`` is (n_obj, n_bands) epochs per band. The null depends on how epochs split
+    across bands, so it is simulated once per distinct split (cached); for more than
+    ``COMBO_SIM_MAX_EPOCHS`` epochs the single-band table at the same dof is used.
+    """
+    counts = np.asarray(counts, dtype=np.int64)
+    dof_c = np.clip(counts - 1, 0, None).sum(1) - 1
+    out = np.full(len(counts), np.nan)
+    ok = dof_c >= min_dof_clip
+    if not ok.any():
+        return out
+    splits = -np.sort(-counts[ok], axis=1)
+    uniq, inv = np.unique(splits, axis=0, return_inverse=True)
+    mean, sd = np.empty(len(uniq)), np.empty(len(uniq))
+    for j, row in enumerate(uniq):
+        split = tuple(int(v) for v in row if v > 0)
+        if sum(split) > COMBO_SIM_MAX_EPOCHS:
+            dof = sum(n - 1 for n in split)
+            m, s = _clip_null_moments(np.array([dof + 1.0]))
+            mean[j], sd[j] = m[0], s[0]
+        else:
+            mean[j], sd[j] = _combo_null_moments(split)
+    inv = np.asarray(inv).ravel()
+    with np.errstate(invalid="ignore", divide="ignore"):
+        out[ok] = (np.cbrt(np.asarray(chi2_clip, float)[ok] / dof_c[ok]) - mean[inv]) / sd[inv]
+    return out
 
 
 def band_floor(sys_frac: float | dict[str, float], band: np.ndarray) -> np.ndarray:
@@ -253,6 +320,7 @@ def lightcurve_stats(
         }
     empty = n == 0
     out = {}
+    combo = combined_stats(cuts, bands, n, chi2, sw, key, code, r2, w, n_obj)
     for j, b in enumerate(bands):
         for name in STATS:
             v = stats[name].reshape(n_obj, nb)[:, j] if n_obj else np.empty(0)
@@ -260,7 +328,45 @@ def lightcurve_stats(
                 out[f"{b}_{name}"] = v.astype("int32")
             else:
                 out[f"{b}_{name}"] = np.where(empty.reshape(n_obj, nb)[:, j], np.nan, v) if n_obj else v
+    out.update(combo)
     return pd.DataFrame(out, index=np.arange(n_obj))
+
+
+COMBO_STATS = ("all_nEpoch", "all_dof", "all_chi2dof", "all_varSig", "all_chi2dofClip", "all_varSigClip")
+
+
+def combined_stats(cuts, bands, n, chi2, sw, key, code, r2, w, n_obj) -> dict:
+    """One chi^2 over all epochs in ``cuts.combo_bands``, each band about its own mean."""
+    nb = len(bands)
+    cb = [bands.index(b) for b in cuts.combo_bands if b in bands]
+    if not cb or n_obj == 0:
+        return {c: np.full(n_obj, np.nan) for c in COMBO_STATS}
+    counts = n.reshape(n_obj, nb)[:, cb]
+    chi2_all = chi2.reshape(n_obj, nb)[:, cb].sum(1)
+    n_all = counts.sum(1)
+    dof_all = np.clip(counts - 1, 0, None).sum(1)
+    # leave-one-out: the epoch with the largest normalized residual over the combo bands
+    inb = np.isin(code, cb)
+    oid = key[inb] // nb
+    rr = r2[inb]
+    order = np.lexsort((-rr, oid))
+    os_ = oid[order]
+    first = order[np.r_[True, os_[1:] != os_[:-1]]] if len(os_) else order
+    g = key[inb][first]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        eff = np.where(n[g] > 1, rr[first] * sw[g] / (sw[g] - w[inb][first]), 0.0)
+    drop = np.zeros(n_obj)
+    drop[oid[first]] = eff
+    chi2_c = np.maximum(chi2_all - drop, 0.0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return {
+            "all_nEpoch": n_all.astype("int32"),
+            "all_dof": dof_all.astype("int32"),
+            "all_chi2dof": np.where(dof_all > 0, chi2_all / dof_all, np.nan),
+            "all_varSig": chi2_to_sigma(chi2_all, dof_all),
+            "all_chi2dofClip": np.where(dof_all > 1, chi2_c / (dof_all - 1), np.nan),
+            "all_varSigClip": combo_clip_sigma(chi2_c, counts),
+        }
 
 
 def summarize(stats: pd.DataFrame, cuts: Cuts) -> pd.DataFrame:
@@ -276,7 +382,22 @@ def summarize(stats: pd.DataFrame, cuts: Cuts) -> pd.DataFrame:
     max_sig = np.full(len(stats), np.nan)
     any_usable = usable.any(axis=1)
     max_sig[any_usable] = np.nanmax(sig[any_usable], axis=1)
+    per_band = n_var >= cuts.min_bands
+    combo_key = "all_varSigClip" if cuts.robust else "all_varSig"
+    if combo_key in stats:
+        csig = stats[combo_key].to_numpy(dtype=float)
+        cdof = stats["all_dof"].to_numpy()
+        with np.errstate(invalid="ignore"):
+            var_combo = (cdof >= cuts.min_combo_dof) & (csig >= cuts.min_sig)
+    else:
+        var_combo = np.zeros(len(stats), bool)
+    if cuts.combined == "only":
+        is_var = var_combo
+    elif cuts.combined == "either":
+        is_var = per_band | var_combo
+    else:
+        is_var = per_band
     return pd.DataFrame(
-        {"nVarBands": n_var.astype("int32"), "maxVarSig": max_sig, "isVariable": n_var >= cuts.min_bands},
+        {"nVarBands": n_var.astype("int32"), "maxVarSig": max_sig, "varCombo": var_combo, "isVariable": is_var},
         index=stats.index,
     )

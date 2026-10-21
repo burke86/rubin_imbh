@@ -350,6 +350,57 @@ def test_object_source_end_to_end():
         assert flagged == {10_000, 10_001, 10_002, 10_003}  # the star itself and its 5" neighbours
 
 
+def sparse_mock(n_obj, lo, hi, var_frac=0.0, amp=0.3, seed=0):
+    """Multi-band light curves with lo..hi epochs per band in r/i/z, unequal errors."""
+    rng = np.random.default_rng(seed)
+    rows, truth = [], rng.random(n_obj) < var_frac
+    for i in range(n_obj):
+        sci = rng.uniform(3e3, 3e4)
+        for b in "riz":
+            k = rng.integers(lo, hi + 1)
+            if k == 0:
+                continue
+            err = rng.uniform(0.5, 2.0, k) * 0.03 * sci
+            sig = amp * sci * rng.standard_normal() * np.ones(k) * rng.choice([-1, 1], k) if truth[i] else 0.0
+            diff = rng.normal(0, err) + sig
+            rows.append(pd.DataFrame({"band": b, "psfDiffFlux": diff, "psfDiffFluxErr": err,
+                                      "psfFlux": sci + diff}, index=np.full(k, i)))
+    lc = pd.concat(rows)
+    return lc, truth
+
+
+def test_combined_statistic_null_and_power():
+    from rubin_imbh.varstats import combo_clip_sigma
+
+    cuts = Cuts(min_epochs=10)
+    # WFD-like: 1-6 epochs per band
+    lc, _ = sparse_mock(6000, 1, 6, seed=31)
+    st = lightcurve_stats(lc.index.to_numpy(), lc, 6000, COLS, cuts, bands=tuple("riz"))
+    ok = st.all_dof >= cuts.min_combo_dof
+    z = st.all_varSigClip[ok]
+    assert ok.mean() > 0.5 and abs(z.mean()) < 0.06 and abs(z.std() - 1) < 0.06, (z.mean(), z.std())
+    assert (z > 4).mean() < 5e-4  # Gaussian tail: 3e-5
+    zr = st.all_varSig[ok]
+    assert abs(zr.mean()) < 0.06 and abs(zr.std() - 1) < 0.08
+    summ = summarize(st, cuts)
+    assert summ.isVariable.mean() < 0.002  # per-band criterion cannot fire (<10 epochs per band)
+    # DDF-like long light curves use the single-band fallback; still calibrated
+    lc2, _ = sparse_mock(1500, 25, 60, seed=32)
+    st2 = lightcurve_stats(lc2.index.to_numpy(), lc2, 1500, COLS, cuts, bands=tuple("riz"))
+    z2 = st2.all_varSigClip
+    assert abs(z2.mean()) < 0.1 and abs(z2.std() - 1) < 0.1, (z2.mean(), z2.std())
+    # power: 30% rms variability with WFD sampling is mostly recovered, per-band mode misses it
+    lc3, truth = sparse_mock(3000, 1, 6, var_frac=0.2, amp=0.3, seed=33)
+    st3 = lightcurve_stats(lc3.index.to_numpy(), lc3, 3000, COLS, cuts, bands=tuple("riz"))
+    s3 = summarize(st3, cuts)
+    usable = (st3.all_dof >= cuts.min_combo_dof).to_numpy()
+    assert s3.isVariable[truth & usable].mean() > 0.6
+    assert s3.isVariable[~truth].mean() < 0.005
+    assert not summarize(st3, Cuts(min_epochs=10, combined="off")).isVariable.any()
+    # an empty / too-short light curve gives NaN, not an error
+    assert np.isnan(combo_clip_sigma(np.array([3.0]), np.array([[2, 1, 1]]))[0])
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

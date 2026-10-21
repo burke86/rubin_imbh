@@ -35,7 +35,9 @@ MIN_EPOCHS = 10
 VARIANTS = {
     "r": ("r", 1), "i": ("i", 1), "z": ("z", 1), "g": ("g", 1),
     "riz >=1": ("riz", 1), "riz >=2": ("riz", 2), "rz >=1": ("rz", 1), "rz both": ("rz", 2), "griz >=2": ("griz", 2),
+    "combined": ("combo", 0), "riz >=1 or combined": ("riz", -1),
 }
+MIN_COMBO_DOF = 4
 MAG_BINS = [-np.inf, 21, 22, 23, 24]
 XRAY = [("J/ApJS/228/2/sources", "OType", "CDF-S 7Ms"),
         ("J/ApJS/224/15/table9", "Type", "E-CDF-S 250ks"),
@@ -102,7 +104,20 @@ def in_footprint(pos, xray_pos, radius_arcmin=2.0, min_sources=3):
     return np.bincount(i, minlength=len(pos)) >= min_sources
 
 
+def combined_hit(st: pd.DataFrame) -> np.ndarray:
+    if "all_varSigClip" not in st:
+        return np.zeros(len(st), bool)
+    return ((st["all_varSigClip"] >= SIG) & (st["all_dof"] >= MIN_COMBO_DOF)).to_numpy()
+
+
 def selected(st: pd.DataFrame, bands: str, k: int) -> np.ndarray:
+    """Per-band criterion in ``bands`` (k bands); k=0 with bands 'combo' is the combined-band
+    criterion alone, k=-1 is one band OR combined."""
+    env = st["envClean"].to_numpy(dtype=bool)
+    if bands == "combo":
+        return combined_hit(st) & env
+    if k < 0:
+        return (selected(st, bands, 1) | combined_hit(st)) & env
     n = np.zeros(len(st), int)
     for b in bands:
         n += ((st[f"{b}_varSigClip"] >= SIG) & (st[f"{b}_nEpoch"] >= MIN_EPOCHS)).to_numpy()

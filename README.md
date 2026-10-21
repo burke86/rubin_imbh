@@ -40,7 +40,9 @@ CC-IN2P3), so the pipeline runs there; it is tested locally on mock catalogs.
 | `{b}_chi2dofClip`, `{b}_varSigClip` | same with the single most deviant epoch removed (exact leave-one-out); `varSigClip` is standardized against the simulated null of this statistic (`scripts/simulate_clip_null.py`), since dropping the largest residual biases χ² low |
 | `{b}_excessVar` | (var − ⟨σ²⟩) / median(`psfFlux`)², normalized by direct-image flux |
 | `{b}_fvar` | √excessVar (fractional rms) |
-| `nVarBands`, `maxVarSig`, `isVariable` | over `--select-bands` (default `riz`): bands with `varSigClip ≥ min_sig` and `nEpoch ≥ min_epochs` |
+| `nVarBands`, `maxVarSig` | over `--select-bands` (default `riz`): bands with `varSigClip ≥ min_sig` and `nEpoch ≥ min_epochs` |
+| `all_nEpoch`, `all_dof`, `all_chi2dof`, `all_varSig`, `all_chi2dofClip`, `all_varSigClip` | combined-band statistic over `--combo-bands` (default `riz`): one χ² over all epochs, each band about its own mean, dof = Σ(n_b − 1); the leave-one-out drops the most deviant epoch over all bands and is standardized against a null simulated per band split (cached; single-band table above 60 epochs) |
+| `varCombo`, `isVariable` | combined criterion (`all_varSigClip ≥ min_sig`, `all_dof ≥ --min-combo-dof` = 4); `isVariable` is per-band OR combined by default (`--combined either|only|off`) |
 
 Selection uses the clipped significance so a single unflagged bad epoch cannot make an
 object variable (`--no-robust` reverts to `varSig`). u and y are computed but do not count
@@ -71,6 +73,16 @@ variable over DP2's ~9 months at these depths. `fit_floor.py`'s rule (flatten th
 brightest bins) over-picks floors; choose on the X-ray metrics instead (~0.5–1%).
 Non-X-ray extended "variables" plausibly include supernovae and TDEs, which needs
 light-curve shape and nuclear-offset information to separate.
+
+### WFD pilot (tile 753, RA 321, Dec −30; Oct 2026)
+
+1.39M Objects in 54 deg², ~15 s compute. DP2 WFD light curves are sparse: median epochs per
+Object u/g/r/i/z/y = 0/1/2/4/3/0, so the per-band criterion (≥10 epochs) applies to <1%
+of Objects. Where it does (i band), median χ²/dof is 0.89–0.97 and faint false positives
+are 0–0.5%. The combined-band statistic exists for this regime: on WFD-like mocks it is
+calibrated (mean +0.05σ, sd 1.01) and recovers 37/66/76/83% of objects with 10/20/30/50%
+rms variability with no false positives, so in the WFD it targets large-amplitude
+variability (TDEs, strongly variable AGN), not low-amplitude dwarf AGN.
 
 ## DIA-source calibration history (Oct 2026)
 
