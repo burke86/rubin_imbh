@@ -102,6 +102,22 @@ objects flagged 12% vs red 3%), so g is excluded from selection by default. In i
 (19–21 mag) point sources are still flagged 20% vs 7% for extended objects, with no colour
 trend; possibly a PSF/brightness residual.
 
+### X-ray validation (CDF-S, 20′ cone at 53.12, −27.81; Oct 2026)
+
+Of 1390 X-ray AGN in coverage, 1088 have a coadd Object within 1.5″ but only **93 have a
+DiaObject at all**, so DIA detection, not the variability statistic, caps completeness.
+`riz ≥1` (envClean) selects 11% of X-ray AGN with r ≤ 24 (42% at r < 21, 21% at 21–22,
+8% at 22–23, 0% at 23–24). Of selected objects in the footprint, 8% match an X-ray AGN
+(chance 0.3%) against a 5.8% base rate among all envClean DiaObjects: extended hosts 15–25%,
+point-like 3–8% (below the base rate, i.e. dominated by stars and residual systematics).
+`r` alone gives the highest X-ray fraction (12%; 25% for extended hosts).
+
+Open issues: (1) a DiaObject-based search misses most AGN; measuring variability on every
+coadd Object (object_collection's nested forced photometry) is needed, especially for
+low-amplitude dwarf AGN; (2) point-like selections need a star veto (e.g. Gaia parallax and
+proper motion) and the bright point-source i-band residual understood; (3) DP2's ~9-month
+baseline limits amplitudes.
+
 A floor of a few percent of the *total* direct-image flux limits sensitivity to low-amplitude,
 host-diluted variability, which is exactly the dwarf-AGN regime, so keep it as low as the
 data allow. ECDFS is a deep-drilling field; wide-survey areas
