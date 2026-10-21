@@ -121,14 +121,16 @@ def main(argv=None):
     st = pd.read_parquet(Path(args.stats).expanduser()).reset_index(drop=True)
     ora = next(c for c in ("coord_ra", "ra_obj") if c in st)
     odec = next(c for c in ("coord_dec", "dec_obj") if c in st)
+    # position of each row: the DiaObject (dia source) or the Object itself (object source)
+    pra, pdec = ("ra", "dec") if "ra" in st else (ora, odec)
     ext = next((c for c in ("refExtendedness", "r_extendedness") if c in st), None)
-    print(f"stats: {len(st)} Object-matched DiaObjects, envClean {st.envClean.sum()}")
+    print(f"stats: {len(st)} rows, envClean {st.envClean.sum()}")
 
     x = load_xray(args.match_arcsec)
     agn = x[x.cls == "AGN"].reset_index(drop=True)
     # completeness only where the stats run has coverage (its cone may not span the whole
     # X-ray survey): at least 5 Object-matched DiaObjects within 2'
-    covered = in_footprint(sky(agn), sky(st), radius_arcmin=2.0, min_sources=5)
+    covered = in_footprint(sky(agn), sky(st, pra, pdec), radius_arcmin=2.0, min_sources=5)
     print(f"X-ray AGN inside the stats coverage: {covered.sum()} of {len(agn)}")
     agn = agn[covered].reset_index(drop=True)
     xpos, apos = sky(x), sky(agn)
@@ -157,7 +159,7 @@ def main(argv=None):
     # link each counterpart Object to the stats row whose matched Object it is
     k = nearest(sky(o, oc.ra, oc.dec), sky(st, ora, odec), 0.3)
     a["st_row"] = k
-    print(f"  ...of which have a DiaObject (in the stats file): {(k >= 0).sum()}")
+    print(f"  ...of which are in the stats file (dia source: have a DiaObject): {(k >= 0).sum()}")
 
     rows = {}
     for name, (bands, kk) in VARIANTS.items():
@@ -175,7 +177,7 @@ def main(argv=None):
     print(pd.DataFrame(rows).T.round(3).to_string())
 
     # --- X-ray match fraction of selected objects inside the footprint
-    spos = sky(st)
+    spos = sky(st, pra, pdec)
     foot = in_footprint(spos, xpos)
     any_x = nearest(spos, xpos, args.match_arcsec) >= 0
     is_agn = nearest(spos, apos, args.match_arcsec) >= 0
@@ -194,7 +196,7 @@ def main(argv=None):
             r[f"xray_AGN_{lab}"] = is_agn[s2].mean() if s2.sum() else np.nan
         rows[name] = r
     ref = foot & st["envClean"].to_numpy(dtype=bool)
-    print(f"\n=== selected objects inside the X-ray footprint ({foot.sum()} Object-matched DiaObjects; "
+    print(f"\n=== selected objects inside the X-ray footprint ({foot.sum()} rows; "
           f"X-ray AGN match rate among all envClean ones: {is_agn[ref].mean():.3f})")
     print(pd.DataFrame(rows).T.round(3).to_string())
     print("xray_AGN is a lower limit on purity; 'chance' is the match rate with X-ray positions shifted by 85\"")

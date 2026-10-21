@@ -33,7 +33,8 @@ def flatten(nf, cols: Columns, err_scale: float, bands: str = "griz") -> pd.Data
     df = pd.DataFrame(
         {
             "obj": obj,
-            "nDia": np.repeat(nf[cols.n_dia_sources].to_numpy(), lengths),
+            # object source has no DIA detection count: 0 puts every Object in the reference
+            "nDia": np.repeat(nf[cols.n_dia_sources].to_numpy() if cols.n_dia_sources else np.zeros(len(nf)), lengths),
             "band": band,
             "visit": flat["visit"].to_numpy(),
             "mjd": flat["midpointMjdTai"].to_numpy(dtype=float),

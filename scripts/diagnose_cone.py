@@ -2,23 +2,28 @@
 
     python scripts/diagnose_cone.py ~/ecdfs_stats_v3.parquet
 
-Splits objects by DIA detection count (1-2 = mostly non-variable reference, >5 = mostly
-real variables) and by direct-image magnitude, and reports the 5-sigma fraction and the
-fractional rms of the flagged objects in each bin. A false-positive rate that rises with
-brightness, with small fvar, points to a systematic floor (--sys-frac).
+Splits objects by DIA detection count (dia source: 1-2 = mostly non-variable reference,
+>5 = mostly real variables) or by morphology (object source), and by direct-image
+magnitude, and reports the 5-sigma fraction and the fractional rms of the flagged objects
+in each bin. A false-positive rate that rises with brightness, with small fvar, points to a
+systematic floor (--sys-frac).
 """
 
 import sys
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from rubin_imbh.calib import calibration_groups  # noqa: E402
 
 SIG = 5.0
 BANDS = "griz"
 MAG_BINS = [-np.inf, 18, 19, 20, 21, 22, 23, 24, 25, np.inf]
 
 d = pd.read_parquet(sys.argv[1])
-d["grp"] = pd.cut(d.nDiaSources, [0, 2, 5, np.inf], labels=["1-2", "3-5", ">5"])
+d["grp"] = calibration_groups(d)[0]
 print(f"objects: {len(d)}")
 
 pd.set_option("display.width", 200)

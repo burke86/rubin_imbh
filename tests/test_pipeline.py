@@ -288,6 +288,68 @@ def test_environment_match_and_bright_star_flag():
         assert len(kept) == 40 and kept.objSep.isna().sum() == 10 and not kept.envClean[kept.objSep.isna()].any()
 
 
+def mock_objects(n_const=400, n_var=30, seed=12):
+    """object_collection-like mock: objectId, coord_ra/dec, coadd columns, nested objectForcedSource.
+
+    Object 0 is an r~16 point source (a bright star); objects 1-3 sit 5" from it.
+    """
+    import nested_pandas as npd
+
+    base, lc = mock_dia(n_const=n_const, n_var=n_var, seed=seed)
+    rng = np.random.default_rng(seed)
+    obj = pd.DataFrame({
+        "objectId": base.diaObjectId.to_numpy() + 10_000,
+        "coord_ra": base.ra.to_numpy(), "coord_dec": base.dec.to_numpy(),
+        "refExtendedness": (rng.random(len(base)) < 0.7).astype(float),
+        "r_psfFlux": rng.uniform(1e3, 3e4, len(base)), "truth_var": base.truth_var.to_numpy(),
+    })
+    obj.loc[0, ["refExtendedness", "r_psfFlux", "truth_var"]] = [0.0, 1.5e6, False]
+    for k in (1, 2, 3):
+        obj.loc[k, "coord_ra"] = obj.coord_ra[0] + 5.0 / 3600 / np.cos(np.deg2rad(obj.coord_dec[0]))
+        obj.loc[k, "coord_dec"] = obj.coord_dec[0]
+    return npd.NestedFrame(obj).add_nested(lc, "objectForcedSource"), base
+
+
+def test_object_source_end_to_end():
+    import inspect
+
+    import lsdb
+
+    from rubin_imbh.pipeline import needed_columns, select_variables
+    from rubin_imbh.varstats import OBJECT
+
+    nf, base = mock_objects()
+    with tempfile.TemporaryDirectory() as tmp:
+        key = "partition_rows" if "partition_rows" in inspect.signature(lsdb.from_dataframe).parameters else "threshold"
+        lsdb.from_dataframe(nf, ra_column="coord_ra", dec_column="coord_dec", lowest_order=2, highest_order=9,
+                            **{key: 150}).to_hats(Path(tmp) / "obj", catalog_name="obj")
+        full = lsdb.open_catalog(Path(tmp) / "obj")
+        columns = needed_columns(full, OBJECT)
+        assert {"objectId", "coord_ra", "coord_dec", "refExtendedness", "r_psfFlux"} <= set(columns)
+        assert "truth_var" not in columns and not any("nDiaSources" in c for c in columns)
+        cat = lsdb.open_catalog(Path(tmp) / "obj", columns=columns)
+        res = select_variables(cat, OBJECT, Cuts()).compute()
+        truth = set(nf.objectId[nf.truth_var])
+        assert set(res.objectId) == truth  # no DIA-count cut: every Object is tested
+        ext = select_variables(cat, OBJECT, Cuts(), prefilter="refExtendedness >= 0.5").compute()
+        assert set(ext.objectId) == set(nf.objectId[nf.truth_var & (nf.refExtendedness >= 0.5)])
+
+        if "how" not in inspect.signature(lsdb.catalog.Catalog.crossmatch).parameters:
+            print("  (bright-star part skipped: needs lsdb >= 0.10)")
+            return
+        from rubin_imbh.environment import add_environment, bright_star_catalog, bright_stars, resolve_object_columns
+
+        oc = resolve_object_columns(full)
+        stars = bright_stars(cat, oc, 18.0)
+        assert len(stars) == 1
+        allst = select_variables(cat, OBJECT, Cuts(), select=False)
+        env = add_environment(allst, None, oc, bright_star_catalog(stars, oc, 15.0), veto_arcsec=10.0,
+                              match_objects=False).compute().set_index("objectId")
+        assert len(env) == len(nf) and "objSep" not in env
+        flagged = set(env.index[~env.envClean])
+        assert flagged == {10_000, 10_001, 10_002, 10_003}  # the star itself and its 5" neighbours
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

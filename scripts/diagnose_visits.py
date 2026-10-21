@@ -23,7 +23,7 @@ from upath import UPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rubin_imbh.pipeline import needed_columns, resolve_columns  # noqa: E402
-from rubin_imbh.varstats import Columns  # noqa: E402
+from rubin_imbh.varstats import DIA, OBJECT  # noqa: E402
 from rubin_imbh.visits import (  # noqa: E402
     add_residuals,
     apply_visit_offsets,
@@ -39,26 +39,33 @@ MAG_BINS = [-np.inf, 19, 21, 23, 25]
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--catalog", default="/rubin/lsdb_data/dp2/dia_object_collection")
+    p.add_argument("--source", choices=["object", "dia"], default="object")
+    p.add_argument("--catalog", help="default: the DP2 collection for --source")
     p.add_argument("--cone", nargs=3, type=float, required=True, metavar=("RA", "DEC", "RADIUS_ARCSEC"))
     p.add_argument("--err-scale", type=float, default=1.07)
     p.add_argument("--bright-mag", type=float, default=21.0, help="reference objects brighter than this set offsets")
     p.add_argument("--bad-sd", type=float, default=1.5, help="visits with robust sd_z above this are 'bad'")
     p.add_argument("--out-visits", help="write the per-visit table to this CSV")
     args = p.parse_args(argv)
+    args.catalog = args.catalog or f"/rubin/lsdb_data/dp2/{'object' if args.source == 'object' else 'dia_object'}_collection"
     pd.set_option("display.width", 220)
     pd.set_option("display.max_columns", 40)
 
     full = lsdb.open_catalog(UPath(args.catalog))
-    cols = resolve_columns(full, Columns())
+    cols = resolve_columns(full, OBJECT if args.source == "object" else DIA)
     search = lsdb.ConeSearch(ra=args.cone[0], dec=args.cone[1], radius_arcsec=args.cone[2])
     nf = lsdb.open_catalog(UPath(args.catalog), search_filter=search, columns=needed_columns(full, cols)).compute()
     n_obj = len(nf)
     df = flatten(nf, cols, args.err_scale)
     print(f"objects: {n_obj}   good griz epochs: {len(df)}   visits: {df.visit.nunique()}   nights: {df.night.nunique()}")
 
-    ref_obj = nf[cols.n_dia_sources].to_numpy() <= 2
-    var_obj = nf[cols.n_dia_sources].to_numpy() > 5
+    if cols.n_dia_sources:
+        ref_obj = nf[cols.n_dia_sources].to_numpy() <= 2
+        var_obj = nf[cols.n_dia_sources].to_numpy() > 5
+        groups = {"ref(1-2)": ref_obj, "var(>5)": var_obj}
+    else:  # every Object is a reference; split by morphology instead
+        ext = nf["refExtendedness"].to_numpy(float) if "refExtendedness" in nf else np.full(len(nf), np.nan)
+        groups = {"point": ext < 0.5, "extended": ext >= 0.5}
     ref = (df.nDia <= 2) & (df.n_ep >= 10)
     bright = df.F.abs() > mag_to_njy(args.bright_mag)
 
@@ -93,7 +100,6 @@ def main(argv=None):
               f"(within << total means offsets are shared by a night)")
 
     # 2. false-positive fractions under candidate fixes
-    groups = {"ref(1-2)": ref_obj, "var(>5)": var_obj}
     variants = {}
     variants["raw"] = frac5_by_mag(df, n_obj, groups, MAG_BINS)
     variants["visit offsets removed"] = frac5_by_mag(df, n_obj, groups, MAG_BINS, flux="f_off")

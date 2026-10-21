@@ -17,10 +17,12 @@ STATS = ("nEpoch", "medFlux", "rmsErr", "chi2dof", "varSig", "chi2dofClip", "var
 
 @dataclass(frozen=True)
 class Columns:
-    """Column names in the DP2 ``dia_object_collection``.
+    """Column names of a DP2 HATS collection with nested forced photometry.
 
-    Defaults follow the DP1/DP2 ForcedSourceOnDiaObject schema; confirm them with
-    ``scripts/select_variables.py inspect`` before a full run.
+    Defaults are the ``dia_object_collection`` (DIA-detected objects); ``OBJECT`` below is
+    the ``object_collection`` (every coadd Object). Confirm with
+    ``scripts/select_variables.py inspect``; ``resolve_columns`` also auto-detects the
+    light-curve column as the nested column holding ``flux``.
     """
 
     lc: str = "diaObjectForcedSource"  # nested forced-photometry light curve
@@ -28,7 +30,8 @@ class Columns:
     flux: str = "psfDiffFlux"  # difference-image flux [nJy]
     flux_err: str = "psfDiffFluxErr"
     sci_flux: str = "psfFlux"  # direct-image flux, used to normalize excess variance
-    n_dia_sources: str = "nDiaSources"
+    obj_id: str = "diaObjectId"
+    n_dia_sources: str | None = "nDiaSources"  # None: no DIA detection count (object_collection)
     flags: tuple[str, ...] = field(
         default=(
             "diff_PixelFlags_nodataCenter",
@@ -45,9 +48,15 @@ class Columns:
     )
 
 
+DIA = Columns()
+# forced photometry on every coadd Object: no DIA detection needed, so low-amplitude
+# nuclear variability (dwarf AGN, early TDEs) is not lost to the 5-sigma DIA threshold
+OBJECT = Columns(lc="objectForcedSource", obj_id="objectId", n_dia_sources=None)
+
+
 @dataclass(frozen=True)
 class Cuts:
-    min_dia_sources: int = 3  # coarse cut on the DiaObject summary row
+    min_dia_sources: int = 3  # coarse cut on the DiaObject summary row (dia source only)
     min_epochs: int = 10  # good forced-photometry epochs required in a band
     min_sig: float = 5.0  # chi^2 significance (Gaussian sigma) for "variable" in a band
     min_bands: int = 1  # number of bands that must pass min_sig

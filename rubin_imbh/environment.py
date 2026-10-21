@@ -71,19 +71,24 @@ def bright_star_catalog(stars: pd.DataFrame, oc: ObjectColumns, margin_arcsec: f
 
 
 def add_environment(cat, objects, oc: ObjectColumns, bright, match_arcsec: float = 1.0,
-                    veto_arcsec: float = 10.0, keep_unmatched: bool = False):
+                    veto_arcsec: float = 10.0, keep_unmatched: bool = False, match_objects: bool = True):
     """Attach the nearest Object within ``match_arcsec`` and the distance to the nearest bright
     star within ``veto_arcsec``.
 
     Adds ``objSep`` (NaN if unmatched; unmatched rows are dropped unless ``keep_unmatched``),
     the Object columns, ``brightStarDist`` (NaN if no bright star within the veto radius) and
-    ``envClean`` (matched and not near a bright star).
+    ``envClean`` (matched and not near a bright star). With ``match_objects=False`` (the input
+    already is object_collection) only the bright-star step runs; a bright star's own row is
+    flagged at distance ~0.
     """
     require_crossmatch_support()
-    x = cat.crossmatch(
-        objects[oc.load], radius_arcsec=match_arcsec, n_neighbors=1, how="left" if keep_unmatched else "inner",
-        suffix_method="overlapping_columns", suffixes=("", "_obj"),
-    ).rename(columns={"_dist_arcsec": "objSep"})
+    if match_objects:
+        x = cat.crossmatch(
+            objects[oc.load], radius_arcsec=match_arcsec, n_neighbors=1, how="left" if keep_unmatched else "inner",
+            suffix_method="overlapping_columns", suffixes=("", "_obj"),
+        ).rename(columns={"_dist_arcsec": "objSep"})
+    else:
+        x = cat
     y = x.crossmatch(
         bright, radius_arcsec=veto_arcsec, n_neighbors=1, how="left",
         suffix_method="overlapping_columns", suffixes=("", "_bright"),
@@ -91,6 +96,9 @@ def add_environment(cat, objects, oc: ObjectColumns, bright, match_arcsec: float
     y = y[[c for c in y.columns if not c.endswith("_bright")]]
 
     def flag(df):
-        return df.assign(envClean=df["objSep"].notna().to_numpy() & df["brightStarDist"].isna().to_numpy())
+        clean = df["brightStarDist"].isna().to_numpy()
+        if match_objects:
+            clean &= df["objSep"].notna().to_numpy()
+        return df.assign(envClean=clean)
 
     return y.map_partitions(flag, meta=flag(y.meta))

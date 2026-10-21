@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from rubin_imbh.calib import calibration_groups  # noqa: E402
 from rubin_imbh.varstats import clip_chi2_to_sigma  # noqa: E402
 
 SIG = 5.0
@@ -38,7 +39,9 @@ def rescaled_sig(x: pd.DataFrame, b: str, s: float) -> np.ndarray:
 
 
 d = pd.read_parquet(sys.argv[1])
-d["grp"] = pd.cut(d.nDiaSources, [0, 2, 5, np.inf], labels=["1-2", "3-5", ">5"])
+d["grp"], REF, VAR = calibration_groups(d)
+print("reference group:", REF or "all objects (object source: nearly all constant)",
+      "| likely-variable group:", VAR or "none")
 pd.set_option("display.width", 200)
 choice = {}
 for b in BANDS:
@@ -49,7 +52,8 @@ for b in BANDS:
     with np.errstate(invalid="ignore", divide="ignore"):
         x["mag"] = 31.4 - 2.5 * np.log10(x[f"{b}_medFlux"])
     x["magbin"] = pd.cut(x["mag"], MAG_BINS).astype(str)
-    ref, var = x.grp == "1-2", x.grp == ">5"
+    ref = (x.grp == REF) if REF else pd.Series(True, index=x.index)
+    var = (x.grp == VAR) if VAR else pd.Series(False, index=x.index)
     # false-positive level the bright end should come down to: the faint reference bins,
     # where the floor is negligible next to the measurement errors
     faint = ref & x.mag.between(BRIGHT, 25)
@@ -63,10 +67,11 @@ for b in BANDS:
     t_ref = pd.DataFrame(rows_ref).T
     t_var = pd.DataFrame(rows_var).T
     order = [c for c in map(str, pd.cut([], MAG_BINS).categories) if c in t_ref.columns] + ["ALL"]
-    print(f"\n=== {b}: 5-sigma fraction, 1-2 detection reference group (rows = floor)")
+    print(f"\n=== {b}: 5-sigma fraction, reference group ({REF or 'all objects'}; rows = floor)")
     print(t_ref[order].round(3).to_string())
-    print(f"--- {b}: 5-sigma fraction, >5 detection group")
-    print(t_var[[c for c in order if c in t_var.columns]].round(3).to_string())
+    if VAR:
+        print(f"--- {b}: 5-sigma fraction, likely-variable group ({VAR})")
+        print(t_var[[c for c in order if c in t_var.columns]].round(3).to_string())
 
     baseline = (rescaled_sig(x[faint], b, 0.0) >= SIG).mean() if faint.any() else 0.0
     bright_cols = [c for c in order[:-1] if pd.Interval(*map(float, c.strip("(]").split(", "))).right <= BRIGHT]

@@ -19,8 +19,14 @@ def nested_fields(catalog, column: str) -> list[str]:
 
 
 # top-level and light-curve fields carried into the output alongside what the statistics need
-KEEP_TOP = ("diaObjectId", "ra", "dec", "tract")
+# (host morphology and coadd fluxes exist only in object_collection)
+KEEP_TOP = ("tract", "refExtendedness", *(f"{b}_psfFlux" for b in "ugrizy"))
 KEEP_LC = ("midpointMjdTai", "visit", "psfFluxErr")
+
+
+def available_columns(catalog) -> list[str]:
+    """All top-level columns, including those not loaded by default."""
+    return list(getattr(catalog, "all_columns", catalog.columns))
 
 
 def needed_columns(catalog, cols: Columns, extra: tuple[str, ...] = ()) -> list[str]:
@@ -32,7 +38,10 @@ def needed_columns(catalog, cols: Columns, extra: tuple[str, ...] = ()) -> list[
     schema is visible; nothing is read either way.
     """
     cols = resolve_columns(catalog, cols)
-    top = [c for c in (*KEEP_TOP, cols.n_dia_sources) if c in catalog.columns]
+    info = catalog.hc_structure.catalog_info
+    allc = available_columns(catalog)
+    want = (cols.obj_id, info.ra_column, info.dec_column, *KEEP_TOP, cols.n_dia_sources)
+    top = [c for c in dict.fromkeys(want) if c and c in allc]
     fields = nested_fields(catalog, cols.lc)
     lc = [cols.band, cols.flux, cols.flux_err, cols.sci_flux, *cols.flags]
     lc += [f for f in KEEP_LC if f in fields]
@@ -42,13 +51,24 @@ def needed_columns(catalog, cols: Columns, extra: tuple[str, ...] = ()) -> list[
 def resolve_columns(catalog, cols: Columns) -> Columns:
     """Check the configured columns against the catalog schema.
 
-    Missing required columns raise; missing flag columns are dropped with a warning,
+    If ``cols.lc`` is not a nested column, the nested column holding ``cols.flux`` is used
+    instead. Missing required columns raise; missing flag columns are dropped with a warning,
     since the DP2 forced-photometry schema is slimmer than DP1's.
     """
-    top = list(catalog.columns)
-    missing = [c for c in (cols.lc, cols.n_dia_sources) if c not in top]
-    if missing:
-        raise KeyError(f"Top-level columns {missing} not in catalog; available: {top}")
+    nested = list(catalog.nested_columns)
+    if cols.lc not in nested:
+        hits = [nc for nc in nested if cols.flux in nested_fields(catalog, nc)]
+        if not hits:
+            raise KeyError(
+                f"no nested column has '{cols.flux}' (difference-image forced photometry); nested "
+                f"columns: { {nc: nested_fields(catalog, nc) for nc in nested} }"
+            )
+        if len(hits) > 1:
+            raise KeyError(f"several nested columns have '{cols.flux}': {hits}; pass --lc-column")
+        warnings.warn(f"light-curve column '{cols.lc}' not found; using '{hits[0]}'", stacklevel=2)
+        cols = replace(cols, lc=hits[0])
+    if cols.n_dia_sources is not None and cols.n_dia_sources not in available_columns(catalog):
+        raise KeyError(f"'{cols.n_dia_sources}' not in catalog; for object_collection use the object source")
     fields = nested_fields(catalog, cols.lc)
     missing = [c for c in (cols.band, cols.flux, cols.flux_err, cols.sci_flux) if c not in fields]
     if missing:
@@ -97,17 +117,24 @@ def add_variability(nf, cols: Columns, cuts: Cuts, select: bool = True, bands=BA
 
 
 def select_variables(
-    catalog, cols: Columns = Columns(), cuts: Cuts = Cuts(), select: bool = True, tile=None
+    catalog, cols: Columns = Columns(), cuts: Cuts = Cuts(), select: bool = True, tile=None,
+    prefilter: str | None = None,
 ):
-    """Lazy LSDB pipeline: coarse DiaObject cut, then light-curve statistics per partition.
+    """Lazy LSDB pipeline: cheap row cuts, then light-curve statistics per partition.
 
-    ``tile = (order, pixel)`` restricts the run to one HEALPix pixel, so a full-sky run can
-    be split into independently restartable pieces.
+    ``prefilter`` is a pandas query on top-level columns (e.g. host selection such as
+    ``"refExtendedness >= 0.5"``); for DIA catalogs ``nDiaSources >= min_dia_sources`` is
+    applied as well. ``tile = (order, pixel)`` restricts the run to one HEALPix pixel, so a
+    full-sky run can be split into independently restartable pieces.
     """
     cols = resolve_columns(catalog, cols)
     if tile is not None:
         catalog = catalog.pixel_search([tuple(tile)])
-    coarse = catalog.query(f"{cols.n_dia_sources} >= {cuts.min_dia_sources}")
+    coarse = catalog
+    if prefilter:
+        coarse = coarse.query(prefilter)
+    if cols.n_dia_sources is not None:
+        coarse = coarse.query(f"{cols.n_dia_sources} >= {cuts.min_dia_sources}")
     kw = dict(cols=cols, cuts=cuts, select=select, tile=tile)
     # dask cannot infer the new columns from an empty frame on its own, so build meta explicitly
     empty = coarse.meta if hasattr(coarse, "meta") else coarse._ddf._meta  # public in lsdb >= 0.7

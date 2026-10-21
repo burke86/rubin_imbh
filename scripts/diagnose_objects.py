@@ -2,6 +2,7 @@
 
     python scripts/diagnose_objects.py --catalog $CAT --cone 53.13 -28.10 1800 --err-scale 1.07
 
+DIA source only (it relies on DIA detection counts and matches DiaObjects to Objects).
 For reference (1-2 detection) objects flagged at 5 sigma, tests which picture fits:
   - outlier tails: are flags driven by a few |z| > 4 epochs, and are those concentrated in
     a subset of objects or spread over all?

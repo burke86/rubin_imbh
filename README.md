@@ -1,7 +1,14 @@
 # rubin_imbh
 
-Variability selection of AGN / IMBH candidates in Rubin DP2, using LSDB on the DP2
-`dia_object_collection` (DiaObjects with nested difference-image forced photometry).
+Variability selection of nuclear AGN, TDE and IMBH candidates in Rubin DP2 with LSDB.
+Two sources of difference-image forced light curves (`--source`):
+
+- **`object`** (default): `object_collection`, forced photometry on every coadd Object. No
+  DIA detection is required, so low-amplitude nuclear variability (host-diluted dwarf AGN,
+  early TDEs) is kept; hosts can be preselected with `--prefilter` / `--extended-only`.
+- **`dia`**: `dia_object_collection`, DIA-detected objects only, for off-nuclear or
+  hostless sources. In CDF-S only 93 of 1088 X-ray AGN with a coadd Object have a
+  DiaObject at all, which is why the object source is the default.
 
 The DP2 HATS catalogs live only at data-rights sites (RSP `/rubin/lsdb_data`, NERSC,
 CC-IN2P3), so the pipeline runs there; it is tested locally on mock catalogs.
@@ -10,7 +17,9 @@ CC-IN2P3), so the pipeline runs there; it is tested locally on mock catalogs.
 
 - `rubin_imbh/varstats.py` — per-object, per-band statistics (pure pandas, vectorized)
 - `rubin_imbh/pipeline.py` — LSDB wrapper: schema check, coarse cut, `map_partitions`
-- `scripts/select_variables.py` — CLI (`inspect`, `tiles`, `run`)
+- `scripts/select_variables.py` — CLI (`inspect`, `tiles`, `run`; `--source object|dia`)
+- `rubin_imbh/environment.py` — Object matching (dia source) and bright-star veto
+- `rubin_imbh/calib.py` — calibration groups for either source
 - `scripts/diagnose_cone.py` — false-positive diagnostics for a calibration cone
 - `scripts/fit_floor.py` — per-band `--sys-frac` from a calibration cone, without rerunning
 - `scripts/diagnose_visits.py` — per-visit offsets, bad visits and same-night correlation on one cone (`rubin_imbh/visits.py`)
@@ -36,7 +45,12 @@ Selection uses the clipped significance so a single unflagged bad epoch cannot m
 object variable (`--no-robust` reverts to `varSig`). u and y are computed but do not count
 by default: in DP2 they have ~10 epochs and showed no variable/reference separation.
 
-### Calibration (ECDFS, 0.5° cone, Oct 2026)
+## DIA-source calibration history (Oct 2026)
+
+Everything below up to "What it does" was measured with `--source dia`; the object source
+still needs its own calibration (error scale, floors, environment), see step 5.
+
+### Calibration (ECDFS, 0.5° cone)
 
 23.5k DiaObjects; median epochs g/r/i/z = 49/45/86/54, u/y ≈ 9–10. Objects with 1–2
 DIA detections (reference) have median χ²/dof 1.10–1.15 in griz against ~0.985 expected,
@@ -128,12 +142,15 @@ matters for dwarf hosts.
 
 ## What it does
 
-1. **Coarse cut** on the DiaObject summary row: `nDiaSources >= 3` (drops one-off
-   detections, most of the catalog) before any light curve is read.
+1. **Cheap row cuts** before any light curve is read: `--prefilter` (object source, e.g.
+   host selection) or `nDiaSources >= 3` (dia source).
 2. **Per-band statistics** on the nested forced-photometry light curve, after dropping
-   flagged epochs: χ²/dof about a constant, its significance, and the excess variance.
-3. **Select** objects with `varSig >= 5` and `nEpoch >= 10` in at least one band, keeping
-   their statistics and light curves.
+   flagged epochs: χ²/dof about a constant, its outlier-robust significance, and the
+   excess variance.
+3. **Select** objects with `varSigClip >= 5` and `nEpoch >= 10` in at least one of r, i, z,
+   keeping their statistics and light curves.
+4. **Environment**: bright-star veto (r < 18 point sources within 10″) for both sources;
+   the dia source can also require a coadd Object within 1″ (`--object-catalog`).
 
 LSDB runs this lazily and in parallel over HEALPix partitions. DP2's HATS catalogs can
 only be read where they are hosted, so full runs happen on the RSP; outputs are small
@@ -151,46 +168,61 @@ git clone https://github.com/burke86/rubin_imbh ~/rubin_imbh
 cd ~/rubin_imbh
 ```
 
-**3. Point at the data.** `/rubin/lsdb_data/dia_object_collection` is a symlink to the
-current release; use the explicit DP2 path so a later release doesn't change it. Set
-`CAT` again in each new terminal.
+**3. Check the environment.** The default catalogs are the explicit DP2 paths
+(`/rubin/lsdb_data/dp2/object_collection`, `.../dia_object_collection`); the top-level
+symlinks follow the current release.
 
 ```bash
 python -c "import lsdb; print(lsdb.__version__)"     # 0.10.4 as of Oct 2026; tested on 0.6 and 0.10
-CAT=/rubin/lsdb_data/dp2/dia_object_collection
 ```
 
-**4. Inspect the schema** (confirmed against DP2 in Oct 2026; rerun after a new release):
+**4. Inspect the schema.** The object source needs difference-image fluxes
+(`psfDiffFlux`) in its nested light curve; the light-curve column is auto-detected as the
+nested column holding them, and the run stops if there is none.
 
 ```bash
-python scripts/select_variables.py --catalog $CAT inspect > inspect.txt
-cat inspect.txt
+python scripts/select_variables.py inspect > obj_inspect.txt        # object_collection
+python scripts/select_variables.py --source dia inspect > dia_inspect.txt
 ```
 
-**5. Calibrate on a small field** (0.5° radius on ECDFS, a deep-drilling field; DP2 barely covers Stripe 82): statistics for every object,
-no selection, no light curves:
+**5. Calibrate on a small field** (ECDFS, a deep-drilling field; DP2 barely covers Stripe
+82): statistics for every Object, no selection, no light curves, then the diagnostics:
 
 ```bash
-python scripts/select_variables.py --catalog $CAT run --cone 53.13 -28.10 1800 \
-    --no-select --stats-only --min-dia-sources 0 --n-workers 4 --memory-limit 6GB \
-    --out ~/test_cone_stats.parquet
+python scripts/select_variables.py run --cone 53.13 -28.10 1800 \
+    --no-select --stats-only --n-workers 4 --memory-limit 6GB --out ~/obj_cone_stats.parquet
+python scripts/diagnose_cone.py ~/obj_cone_stats.parquet
+python scripts/fit_floor.py ~/obj_cone_stats.parquet
 ```
 
-Look at the `r_chi2dof` distribution of the bulk (non-variable) population. DIA errors are
-usually underestimated; if its median is ~1.3, use `--err-scale ~1.15` (√median) so the
-null sits at 1. Keep `--n-workers × --memory-limit` within the server size.
+Nearly every Object is constant, so the bulk sets the error scale: if the median
+`r_chi2dof` is ~1.3, use `--err-scale ~1.15` (√median). The DIA-source value was 1.07.
+Keep `--n-workers × --memory-limit` within the server size.
 
-**6. Full run in HEALPix tiles**, only after steps 4–5 look right:
+**6. Validate** against Chandra AGN (cone on CDF-S):
 
 ```bash
-python scripts/select_variables.py --catalog $CAT tiles --order 3     # preview
-python scripts/select_variables.py --catalog $CAT run --err-scale 1.07 \
-    --tile-order 3 --n-workers 8 --out ~/rubin_imbh/dp2_variables
+python scripts/select_variables.py run --cone 53.12 -27.81 1200 --no-select --stats-only \
+    --err-scale <from step 5> --out ~/obj_cdfs_stats.parquet
+python scripts/validate_xray.py --stats ~/obj_cdfs_stats.parquet --out ~/obj_cdfs_selected.csv
 ```
 
-### Environment cuts (`--object-catalog`, lsdb >= 0.10)
+**7. Full run in HEALPix tiles**, only after steps 4–6 look right:
 
-With `--object-catalog /rubin/lsdb_data/dp2/object_collection`, selected objects are
+```bash
+python scripts/select_variables.py tiles --order 3     # preview
+python scripts/select_variables.py run --err-scale <from step 5> --tile-order 3 \
+    --n-workers 8 --out ~/rubin_imbh/dp2_variables
+```
+
+For the dia source add `--source dia` (and `--min-dia-sources`, `--object-catalog`).
+
+### Environment cuts (lsdb >= 0.10)
+
+Object source: the bright-star veto runs against the input catalog itself (`--no-veto` to
+skip), adding `brightStarDist` and `envClean`; a bright star's own row is flagged.
+
+Dia source, with `--object-catalog /rubin/lsdb_data/dp2/object_collection`: selected objects are
 crossmatched to the nearest coadd Object within `--match-arcsec` (default 1″; unmatched
 objects are dropped unless `--keep-unmatched`), and to r < `--bright-star-mag` (18) point
 sources within `--veto-arcsec` (10″). Added columns: `objSep`, the Object's id,

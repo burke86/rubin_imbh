@@ -1,19 +1,26 @@
-"""Select variable DIA objects in Rubin DP2 with LSDB.
+"""Select variable objects in Rubin DP2 with LSDB.
+
+Two sources of light curves:
+  --source object (default): forced photometry on every coadd Object (object_collection).
+      No DIA detection is required, so low-amplitude nuclear variability (dwarf AGN, TDEs)
+      is kept; the bright-star veto runs against the same catalog.
+  --source dia: forced photometry on DIA-detected objects (dia_object_collection), with an
+      nDiaSources cut and optional matching to coadd Objects (--object-catalog). Use it for
+      off-nuclear or hostless sources.
 
 Run on the RSP (or another DP2 HATS site). Typical sequence:
 
-    # 1. confirm column names in the DP2 collection
+    # 1. confirm column names
     python scripts/select_variables.py inspect
 
     # 2. statistics for every object in a test cone (no selection), to calibrate
-    #    err_scale and the significance threshold on the non-variable population
-    python scripts/select_variables.py run --cone 28.5 0.4 1800 --no-select \
+    python scripts/select_variables.py run --cone 53.13 -28.10 1800 --no-select --stats-only \
         --out ~/rubin_imbh/test_cone_stats.parquet
 
     # 3. full-sky selection, split into order-3 HEALPix tiles (~54 deg^2 each); each tile
     #    is written to <out>/o3_p<pixel>/ and finished tiles are skipped on a rerun
     python scripts/select_variables.py tiles --order 3
-    python scripts/select_variables.py run --err-scale 1.2 --tile-order 3 \
+    python scripts/select_variables.py run --err-scale 1.07 --tile-order 3 \
         --out ~/rubin_imbh/dp2_variables
 """
 
@@ -31,9 +38,13 @@ from upath import UPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rubin_imbh.pipeline import needed_columns, nested_fields, select_variables, tile_pixels  # noqa: E402
-from rubin_imbh.varstats import Columns, Cuts  # noqa: E402
+from rubin_imbh.varstats import DIA, OBJECT, Cuts  # noqa: E402
 
-DEFAULT_CATALOG = "/rubin/lsdb_data/dp2/dia_object_collection"
+DEFAULT_CATALOG = {
+    "object": "/rubin/lsdb_data/dp2/object_collection",
+    "dia": "/rubin/lsdb_data/dp2/dia_object_collection",
+}
+PRESETS = {"object": OBJECT, "dia": DIA}
 
 
 def parse_sys_frac(text: str):
@@ -66,13 +77,26 @@ def cmd_inspect(args):
             print(f"  {c}")
 
 
+def build_columns(args):
+    from dataclasses import replace
+
+    cols = PRESETS[args.source]
+    over = {k: v for k, v in (("lc", args.lc_column), ("flux", args.flux_column),
+                              ("sci_flux", args.sci_flux_column)) if v}
+    if "flux" in over:
+        over["flux_err"] = over["flux"] + "Err"
+    return replace(cols, **over)
+
+
+def build_prefilter(args) -> str | None:
+    parts = [args.prefilter] if args.prefilter else []
+    if args.extended_only:
+        parts.append("refExtendedness >= 0.5")
+    return " and ".join(f"({p})" for p in parts) or None
+
+
 def cmd_run(args):
-    cols = Columns(
-        lc=args.lc_column,
-        flux=args.flux_column,
-        flux_err=args.flux_column + "Err",
-        sci_flux=args.sci_flux_column,
-    )
+    cols = build_columns(args)
     cuts = Cuts(
         min_dia_sources=args.min_dia_sources,
         min_epochs=args.min_epochs,
@@ -83,8 +107,11 @@ def cmd_run(args):
         select_bands=tuple(args.select_bands),
         robust=not args.no_robust,
     )
+    logging.info("source: %s   catalog: %s", args.source, args.catalog)
     logging.info("columns: %s", cols)
-    logging.info("cuts: %s", cuts)
+    logging.info("cuts: %s   prefilter: %s", cuts, build_prefilter(args))
+    if args.source == "object" and args.object_catalog:
+        sys.exit("--object-catalog is for --source dia; the object source vetoes against its own catalog")
 
     if args.cone and (args.tile or args.tile_order is not None):
         sys.exit("--cone cannot be combined with --tile/--tile-order")
@@ -94,12 +121,15 @@ def cmd_run(args):
     with Client(n_workers=args.n_workers, threads_per_worker=1, memory_limit=args.memory_limit) as client:
         logging.info("dask dashboard: %s", client.dashboard_link)
         # open once for the schema (no data read), then reopen with only the needed columns
-        extra = ("diaSource",) if args.keep_dia_source else ()
+        extra = ("diaSource",) if args.keep_dia_source and args.source == "dia" else ()
         columns = needed_columns(open_dia(args.catalog), cols, extra)
         logging.info("loading columns: %s", columns)
         cat = open_dia(args.catalog, args.cone, columns)
         out = Path(args.out).expanduser()
-        env = load_environment(args, out) if args.object_catalog else None
+        if args.source == "object":
+            env = None if args.no_veto else load_environment(args, out, args.catalog)
+        else:
+            env = load_environment(args, out, args.object_catalog) if args.object_catalog else None
 
         if args.tile_order is None:
             tile = tuple(args.tile) if args.tile else None
@@ -121,7 +151,7 @@ def cmd_run(args):
 DONE = "_DONE"
 
 
-def load_environment(args, out: Path):
+def load_environment(args, out: Path, object_catalog: str):
     """Object catalog plus a bright-star catalog with a margin wider than the veto radius.
 
     Bright stars are computed once (restricted to the cone, padded by the veto radius, when
@@ -135,8 +165,8 @@ def load_environment(args, out: Path):
     )
 
     require_crossmatch_support()
-    oc = resolve_object_columns(lsdb.open_catalog(UPath(args.object_catalog)))
-    objects = lsdb.open_catalog(UPath(args.object_catalog), columns=oc.load)
+    oc = resolve_object_columns(lsdb.open_catalog(UPath(object_catalog)))
+    objects = lsdb.open_catalog(UPath(object_catalog), columns=oc.load)
     logging.info("object columns: %s", oc)
 
     cache = Path(args.bright_stars).expanduser() if args.bright_stars else None
@@ -151,10 +181,10 @@ def load_environment(args, out: Path):
         src = objects
         if args.cone:
             pad = args.cone[2] + 2 * args.veto_arcsec
-            src = lsdb.open_catalog(UPath(args.object_catalog), columns=oc.load,
+            src = lsdb.open_catalog(UPath(object_catalog), columns=oc.load,
                                     search_filter=lsdb.ConeSearch(ra=args.cone[0], dec=args.cone[1], radius_arcsec=pad))
         logging.info("computing r < %g point sources from %s (one pass over the object catalog)",
-                     args.bright_star_mag, args.object_catalog)
+                     args.bright_star_mag, object_catalog)
         stars = bright_stars(src, oc, args.bright_star_mag)
         cache.parent.mkdir(parents=True, exist_ok=True)
         stars.to_parquet(cache)
@@ -169,14 +199,15 @@ def run_one(cat, cols, cuts, args, dest: Path, tile, env=None):
     In tile mode ``dest`` is a directory holding the output plus a ``_DONE`` marker,
     written last so an interrupted tile is redone on the next run.
     """
-    result = select_variables(cat, cols, cuts, select=not args.no_select, tile=tile)
+    result = select_variables(cat, cols, cuts, select=not args.no_select, tile=tile, prefilter=build_prefilter(args))
     if args.no_select or args.stats_only:
         result = result[[c for c in result.columns if c not in cat.nested_columns]]
     if env is not None:
         from rubin_imbh.environment import add_environment
 
         result = add_environment(result, env["objects"], env["oc"], env["bright"], match_arcsec=args.match_arcsec,
-                                 veto_arcsec=args.veto_arcsec, keep_unmatched=args.keep_unmatched)
+                                 veto_arcsec=args.veto_arcsec, keep_unmatched=args.keep_unmatched,
+                                 match_objects=args.source == "dia")
 
     if tile is None and dest.suffix == ".parquet":
         df = result.compute()
@@ -216,7 +247,10 @@ def cmd_tiles(args):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--catalog", default=DEFAULT_CATALOG, help="path to the DP2 dia_object_collection")
+    p.add_argument("--source", choices=["object", "dia"], default="object",
+                   help="object: forced photometry on every coadd Object (default; nuclear AGN/TDEs); "
+                        "dia: DIA-detected objects (off-nuclear/hostless)")
+    p.add_argument("--catalog", help="HATS collection path (default: the DP2 collection for --source)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("inspect", help="print the catalog schema")
@@ -231,8 +265,11 @@ def main(argv=None):
     r.add_argument("--tile-order", type=int, help="loop over all tiles at this order, skipping done ones")
     r.add_argument("--no-select", action="store_true", help="keep all objects (for calibration)")
     r.add_argument("--stats-only", action="store_true", help="drop the nested light curves from the output")
-    r.add_argument("--keep-dia-source", action="store_true", help="also load and keep the nested diaSource column")
-    r.add_argument("--min-dia-sources", type=int, default=Cuts.min_dia_sources)
+    r.add_argument("--prefilter", help="pandas query on top-level columns before any light curve is read, "
+                   "e.g. 'r_psfFlux > 1000' (object source: host selection)")
+    r.add_argument("--extended-only", action="store_true", help="add refExtendedness >= 0.5 to the prefilter")
+    r.add_argument("--keep-dia-source", action="store_true", help="dia source: also keep the nested diaSource column")
+    r.add_argument("--min-dia-sources", type=int, default=Cuts.min_dia_sources, help="dia source only")
     r.add_argument("--min-epochs", type=int, default=Cuts.min_epochs)
     r.add_argument("--min-sig", type=float, default=Cuts.min_sig)
     r.add_argument("--min-bands", type=int, default=Cuts.min_bands)
@@ -241,11 +278,12 @@ def main(argv=None):
                    help="error floor as a fraction of direct-image flux: 0.02 or g=0.03,r=0.02,...")
     r.add_argument("--select-bands", default="".join(Cuts.select_bands), help="bands that count toward selection")
     r.add_argument("--no-robust", action="store_true", help="select on varSig instead of varSigClip")
-    r.add_argument("--lc-column", default=Columns.lc)
-    r.add_argument("--flux-column", default=Columns.flux, help="error column is <name>Err")
-    r.add_argument("--sci-flux-column", default=Columns.sci_flux)
-    r.add_argument("--object-catalog", help="object_collection path: match to coadd Objects and flag bright-star "
-                   "neighbourhoods (e.g. /rubin/lsdb_data/dp2/object_collection; needs lsdb >= 0.10)")
+    r.add_argument("--lc-column", help="nested light-curve column (default: auto-detected)")
+    r.add_argument("--flux-column", help=f"default {DIA.flux}; error column is <name>Err")
+    r.add_argument("--sci-flux-column", help=f"default {DIA.sci_flux}")
+    r.add_argument("--no-veto", action="store_true", help="object source: skip the bright-star veto")
+    r.add_argument("--object-catalog", help="dia source: object_collection path to match coadd Objects and flag "
+                   "bright-star neighbourhoods (e.g. /rubin/lsdb_data/dp2/object_collection; needs lsdb >= 0.10)")
     r.add_argument("--match-arcsec", type=float, default=1.0, help="DiaObject-Object match radius")
     r.add_argument("--keep-unmatched", action="store_true", help="keep variables with no Object match (objSep NaN)")
     r.add_argument("--veto-arcsec", type=float, default=10.0, help="bright-star neighbourhood radius")
@@ -255,6 +293,7 @@ def main(argv=None):
     r.add_argument("--memory-limit", default="6GB", help="per worker")
 
     args = p.parse_args(argv)
+    args.catalog = args.catalog or DEFAULT_CATALOG[args.source]
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     {"inspect": cmd_inspect, "tiles": cmd_tiles, "run": cmd_run}[args.cmd](args)
 
