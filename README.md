@@ -45,6 +45,32 @@ Selection uses the clipped significance so a single unflagged bad epoch cannot m
 object variable (`--no-robust` reverts to `varSig`). u and y are computed but do not count
 by default: in DP2 they have ~10 epochs and showed no variable/reference separation.
 
+## Object-source calibration and validation (Oct 2026)
+
+ECDFS 30′ cone (255k Objects): median χ²/dof of faint Objects is 0.96–1.0 in every band, so
+`--err-scale 1.0`. Faint (>21 mag) extended Objects are flagged at 0.2–1.5% (r, i, z); the
+excess is a brightness-proportional floor brighter than ~20 mag, with flagged `fvar`
+0.5–1%. Objects without `refExtendedness` (~9%) have degenerate photometry (median
+χ²/dof 0 at 19–22 mag): use `--prefilter "refExtendedness >= 0"`.
+
+CDF-S validation (20′ cone, 103k Objects): 1045 of 1095 X-ray AGN with an Object are now
+tested (93 with the DIA source). `validate_xray.py --floors` on a floor-free run:
+
+| floor | riz ≥1 compl. r≤22 / r≤24 | X-ray purity (ext) | r compl. r≤22 | r purity |
+|---|---|---|---|---|
+| 0 | 0.35 / 0.11 | 0.066 (0.085) | 0.28 | 0.11 |
+| 0.5% | 0.28 / 0.10 | 0.088 (0.084) | 0.28 | 0.15 |
+| 1% | 0.26 / 0.09 | 0.114 (0.081) | 0.26 | 0.20 |
+| 2.5% (`fit_floor`) | 0.22 / 0.08 | 0.114 (0.070) | 0.22 | 0.21 |
+
+The floor mainly removes bright point sources; the extended-host X-ray fraction stays at
+~8–16% for any floor. Completeness is about the same as the DIA source (11% at r ≤ 24;
+45% at r < 21, 0% at 23–24), so the AGN without DiaObjects are mostly not significantly
+variable over DP2's ~9 months at these depths. `fit_floor.py`'s rule (flatten the
+brightest bins) over-picks floors; choose on the X-ray metrics instead (~0.5–1%).
+Non-X-ray extended "variables" plausibly include supernovae and TDEs, which needs
+light-curve shape and nuclear-offset information to separate.
+
 ## DIA-source calibration history (Oct 2026)
 
 Everything below up to "What it does" was measured with `--source dia`; the object source
