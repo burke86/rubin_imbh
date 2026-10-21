@@ -141,6 +141,20 @@ def good_epoch_mask(flat: pd.DataFrame, cols: Columns, flags: tuple[str, ...]) -
     return good
 
 
+def band_codes(band: pd.Series, bands: tuple[str, ...]) -> np.ndarray:
+    """Integer index of each epoch's band in ``bands`` (-1 if absent or missing), without
+    materializing Python strings for Arrow-backed columns."""
+    if isinstance(band.dtype, pd.ArrowDtype):
+        import pyarrow as pa
+        import pyarrow.compute as pc
+
+        idx = pc.index_in(pa.array(band.array), value_set=pa.array(list(bands)))
+        return np.asarray(idx.to_pandas(), dtype=float)  # nulls -> nan
+    codes = pd.Categorical(band, categories=list(bands)).codes.astype(float)
+    codes[codes < 0] = np.nan
+    return codes
+
+
 def lightcurve_stats(
     obj: np.ndarray,
     flat: pd.DataFrame,
@@ -164,81 +178,89 @@ def lightcurve_stats(
     Returns
     -------
     DataFrame with ``n_obj`` rows and columns ``{band}_{stat}`` for ``STATS``.
+
+    Epochs are grouped by the integer key ``obj * n_bands + band`` with ``np.bincount``
+    (no pandas groupby, no string columns), keeping memory to a few float arrays per epoch.
     """
-    good = good_epoch_mask(flat, cols, flags)
+    nb = len(bands)
+    code = band_codes(flat[cols.band], bands)
+    good = good_epoch_mask(flat, cols, flags) & np.isfinite(code)
+    code = code[good].astype(np.int64)
+    key = np.asarray(obj)[good].astype(np.int64) * nb + code
     f = flat[cols.flux].to_numpy(dtype=float, na_value=np.nan)[good]
     e = cuts.err_scale * flat[cols.flux_err].to_numpy(dtype=float, na_value=np.nan)[good]
     s = flat[cols.sci_flux].to_numpy(dtype=float, na_value=np.nan)[good]
-    band = flat[cols.band].to_numpy()[good]
-    floor = band_floor(cuts.sys_frac, band)
+    if isinstance(cuts.sys_frac, dict):
+        floor = np.array([cuts.sys_frac.get(b, 0.0) for b in bands])[code]
+    else:
+        floor = np.full(len(code), float(cuts.sys_frac))
     if np.any(floor > 0):
         e = np.hypot(e, floor * np.nan_to_num(np.abs(s)))
     e2 = e**2
     w = 1.0 / e2
-    df = pd.DataFrame(
-        {
-            "obj": obj[good],
-            "band": band,
-            "f": f,
-            "e2": e2,
-            "s": s,
-            "w": w,
-            "wf": w * f,
-            "wf2": w * f * f,
-        }
-    )
-    df = df[df["band"].isin(bands)]
+    K = n_obj * nb
 
-    g = df.groupby(["obj", "band"], sort=False, observed=True)
-    agg = g.agg(
-        n=("f", "size"),
-        sw=("w", "sum"),
-        swf=("wf", "sum"),
-        swf2=("wf2", "sum"),
-        var_f=("f", "var"),
-        mean_e2=("e2", "mean"),
-        med_s=("s", "median"),
-    )
-    n = agg["n"].to_numpy(dtype=float)
-    dof = n - 1.0
-    # chi^2 about the weighted mean, written in moment form so it groups cleanly
-    chi2 = np.maximum(agg["swf2"] - agg["swf"] ** 2 / agg["sw"], 0.0).to_numpy()
+    def gsum(x):
+        return np.bincount(key, weights=x, minlength=K)
+
+    n = np.bincount(key, minlength=K).astype(float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        sw = gsum(w)
+        mu = gsum(w * f) / sw
+        d = f - mu[key]
+        r2 = w * d * d
+        chi2 = gsum(r2)  # chi^2 about the weighted mean (two-pass: no cancellation)
+        mu_u = gsum(f) / n
+        var_f = gsum((f - mu_u[key]) ** 2) / (n - 1)
+        var_f[n < 2] = np.nan
+        mean_e2 = gsum(e2) / n
+
+    # median direct-image flux per group: sort by (key, s); NaNs sort last within a group
+    order = np.lexsort((s, key))
+    ks, ss = key[order], s[order]
+    uniq, start = np.unique(ks, return_index=True)
+    n_valid = np.bincount(key, weights=np.isfinite(s).astype(float), minlength=K)[uniq].astype(np.int64)
+    med = np.full(K, np.nan)
+    if len(ss):
+        lo = start + np.maximum(n_valid - 1, 0) // 2
+        hi = start + n_valid // 2
+        med[uniq] = np.where(n_valid > 0, 0.5 * (ss[lo] + ss[hi]), np.nan)
 
     # Leave-one-out chi^2 without each light curve's most deviant epoch, so a single
-    # unflagged glitch cannot make an object "variable". Exact: the dropped epoch's
-    # moments are subtracted and the mean recomputed.
-    mean = g["wf"].transform("sum") / g["w"].transform("sum")
-    df = df.assign(r2=df["w"] * (df["f"] - mean) ** 2)
-    worst = df.loc[df.groupby(["obj", "band"], sort=False, observed=True)["r2"].idxmax().reindex(agg.index)]
-    sw_c = agg["sw"].to_numpy() - worst["w"].to_numpy()
-    swf_c = agg["swf"].to_numpy() - worst["wf"].to_numpy()
-    swf2_c = agg["swf2"].to_numpy() - worst["wf2"].to_numpy()
-    dof_c = n - 2.0
+    # unflagged glitch cannot make an object "variable". Exact closed form: dropping epoch k
+    # lowers chi^2 by w_k d_k^2 * sw / (sw - w_k).
+    order = np.lexsort((-r2, key))
+    ks = key[order]
+    first = order[np.r_[True, ks[1:] != ks[:-1]]] if len(ks) else order
+    wk = np.zeros(K)
+    r2k = np.zeros(K)
+    wk[key[first]] = w[first]
+    r2k[key[first]] = r2[first]
     with np.errstate(divide="ignore", invalid="ignore"):
-        chi2_c = np.maximum(swf2_c - swf_c**2 / sw_c, 0.0)
-    xs = ((agg["var_f"] - agg["mean_e2"]) / agg["med_s"] ** 2).to_numpy()
-    with np.errstate(divide="ignore", invalid="ignore"):
-        out = pd.DataFrame(
-            {
-                "nEpoch": agg["n"].to_numpy(),
-                "medFlux": agg["med_s"].to_numpy(),  # direct-image flux [nJy], includes host
-                "rmsErr": np.sqrt(agg["mean_e2"].to_numpy()),  # after err_scale / sys_frac
-                "chi2dof": np.where(dof > 0, chi2 / dof, np.nan),
-                "varSig": chi2_to_sigma(chi2, dof),
-                "chi2dofClip": np.where(dof_c > 0, chi2_c / dof_c, np.nan),
-                "varSigClip": clip_chi2_to_sigma(chi2_c, n),
-                "excessVar": xs,
-                "fvar": np.sqrt(np.clip(xs, 0.0, None)),
-            },
-            index=agg.index,
-        )
-
-    wide = out.unstack("band")
-    wide.columns = [f"{b}_{stat}" for stat, b in wide.columns]
-    wide = wide.reindex(index=np.arange(n_obj), columns=[f"{b}_{s}" for b in bands for s in STATS])
-    nep = [f"{b}_nEpoch" for b in bands]
-    wide[nep] = wide[nep].fillna(0).astype("int32")
-    return wide
+        chi2_c = np.maximum(chi2 - r2k * sw / (sw - wk), 0.0)
+        dof, dof_c = n - 1.0, n - 2.0
+        xs = (var_f - mean_e2) / med**2
+        stats = {
+            "nEpoch": n,
+            "medFlux": med,  # direct-image flux [nJy], includes host
+            "rmsErr": np.sqrt(mean_e2),  # after err_scale / sys_frac
+            "chi2dof": np.where(dof > 0, chi2 / dof, np.nan),
+            "varSig": chi2_to_sigma(chi2, dof),
+            "chi2dofClip": np.where(dof_c > 0, chi2_c / dof_c, np.nan),
+            "varSigClip": clip_chi2_to_sigma(chi2_c, n),
+            "excessVar": xs,
+            "fvar": np.sqrt(np.clip(xs, 0.0, None)),
+        }
+    empty = n == 0
+    out = {}
+    for j, b in enumerate(bands):
+        for name in STATS:
+            v = stats[name].reshape(n_obj, nb)[:, j] if n_obj else np.empty(0)
+            if name == "nEpoch":
+                out[f"{b}_{name}"] = v.astype("int32")
+            else:
+                out[f"{b}_{name}"] = np.where(empty.reshape(n_obj, nb)[:, j], np.nan, v) if n_obj else v
+    return pd.DataFrame(out, index=np.arange(n_obj))
 
 
 def summarize(stats: pd.DataFrame, cuts: Cuts) -> pd.DataFrame:

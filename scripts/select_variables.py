@@ -122,7 +122,7 @@ def cmd_run(args):
         logging.info("dask dashboard: %s", client.dashboard_link)
         # open once for the schema (no data read), then reopen with only the needed columns
         extra = ("diaSource",) if args.keep_dia_source and args.source == "dia" else ()
-        columns = needed_columns(open_dia(args.catalog), cols, extra)
+        columns = needed_columns(open_dia(args.catalog), cols, extra, keep_lc=not (args.stats_only or args.no_select))
         logging.info("loading columns: %s", columns)
         cat = open_dia(args.catalog, args.cone, columns)
         out = Path(args.out).expanduser()
@@ -199,7 +199,8 @@ def run_one(cat, cols, cuts, args, dest: Path, tile, env=None):
     In tile mode ``dest`` is a directory holding the output plus a ``_DONE`` marker,
     written last so an interrupted tile is redone on the next run.
     """
-    result = select_variables(cat, cols, cuts, select=not args.no_select, tile=tile, prefilter=build_prefilter(args))
+    result = select_variables(cat, cols, cuts, select=not args.no_select, tile=tile, prefilter=build_prefilter(args),
+                              chunk_objects=args.chunk_objects)
     if args.no_select or args.stats_only:
         result = result[[c for c in result.columns if c not in cat.nested_columns]]
     if env is not None:
@@ -289,6 +290,8 @@ def main(argv=None):
     r.add_argument("--veto-arcsec", type=float, default=10.0, help="bright-star neighbourhood radius")
     r.add_argument("--bright-star-mag", type=float, default=18.0, help="r-band limit for veto stars")
     r.add_argument("--bright-stars", help="bright-star parquet cache (default: next to --out)")
+    r.add_argument("--chunk-objects", type=int, default=10_000,
+                   help="objects per light-curve chunk within a partition (lower to cut peak memory)")
     r.add_argument("--n-workers", type=int, default=4)
     r.add_argument("--memory-limit", default="6GB", help="per worker")
 
