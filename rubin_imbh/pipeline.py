@@ -18,6 +18,27 @@ def nested_fields(catalog, column: str) -> list[str]:
     return list(catalog.dtypes[column].field_names)
 
 
+# top-level and light-curve fields carried into the output alongside what the statistics need
+KEEP_TOP = ("diaObjectId", "ra", "dec", "tract")
+KEEP_LC = ("midpointMjdTai", "visit", "psfFluxErr")
+
+
+def needed_columns(catalog, cols: Columns, extra: tuple[str, ...] = ()) -> list[str]:
+    """Columns to load, with nested fields as ``"lc.field"``.
+
+    The DP2 collection is ~1.1 TB, mostly nested data the pipeline never touches (the
+    whole ``diaSource`` column and most forced-photometry fields), so loading only these
+    cuts I/O substantially. ``catalog`` should be opened without ``columns`` so its full
+    schema is visible; nothing is read either way.
+    """
+    cols = resolve_columns(catalog, cols)
+    top = [c for c in (*KEEP_TOP, cols.n_dia_sources) if c in catalog.columns]
+    fields = nested_fields(catalog, cols.lc)
+    lc = [cols.band, cols.flux, cols.flux_err, cols.sci_flux, *cols.flags]
+    lc += [f for f in KEEP_LC if f in fields]
+    return top + [f"{cols.lc}.{f}" for f in dict.fromkeys(lc)] + list(extra)
+
+
 def resolve_columns(catalog, cols: Columns) -> Columns:
     """Check the configured columns against the catalog schema.
 
@@ -89,5 +110,6 @@ def select_variables(
     coarse = catalog.query(f"{cols.n_dia_sources} >= {cuts.min_dia_sources}")
     kw = dict(cols=cols, cuts=cuts, select=select, tile=tile)
     # dask cannot infer the new columns from an empty frame on its own, so build meta explicitly
-    meta = add_variability(coarse._ddf._meta, **kw)
+    empty = coarse.meta if hasattr(coarse, "meta") else coarse._ddf._meta  # public in lsdb >= 0.7
+    meta = add_variability(empty, **kw)
     return coarse.map_partitions(add_variability, meta=meta, **kw)

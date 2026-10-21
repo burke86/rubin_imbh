@@ -29,28 +29,33 @@ import lsdb
 from upath import UPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from rubin_imbh.pipeline import nested_fields, select_variables, tile_pixels  # noqa: E402
+from rubin_imbh.pipeline import needed_columns, nested_fields, select_variables, tile_pixels  # noqa: E402
 from rubin_imbh.varstats import Columns, Cuts  # noqa: E402
 
 DEFAULT_CATALOG = "/rubin/lsdb_data/dia_object_collection"
 
 
-def open_dia(path: str, cone=None):
+def open_dia(path: str, cone=None, columns=None):
     search = lsdb.ConeSearch(ra=cone[0], dec=cone[1], radius_arcsec=cone[2]) if cone else None
-    return lsdb.open_catalog(UPath(path), search_filter=search)
+    return lsdb.open_catalog(UPath(path), search_filter=search, columns=columns)
 
 
 def cmd_inspect(args):
     cat = open_dia(args.catalog)
     print(cat)
     print(f"\npartitions: {cat.npartitions}")
-    print(f"top-level columns ({len(cat.columns)}):")
+    print(f"default-loaded columns ({len(cat.columns)}):")
     for c in cat.columns:
         print(f"  {c:40s} {cat.dtypes[c]}")
     for nc in cat.nested_columns:
         print(f"\nnested column '{nc}' fields:")
         for f in nested_fields(cat, nc):
             print(f"  {f}")
+    if hasattr(cat, "all_columns"):
+        extra = [c for c in cat.all_columns if c not in cat.columns]
+        print(f"\nother available columns, not loaded by default ({len(extra)}):")
+        for c in extra:
+            print(f"  {c}")
 
 
 def cmd_run(args):
@@ -78,7 +83,11 @@ def cmd_run(args):
 
     with Client(n_workers=args.n_workers, threads_per_worker=1, memory_limit=args.memory_limit) as client:
         logging.info("dask dashboard: %s", client.dashboard_link)
-        cat = open_dia(args.catalog, args.cone)
+        # open once for the schema (no data read), then reopen with only the needed columns
+        extra = ("diaSource",) if args.keep_dia_source else ()
+        columns = needed_columns(open_dia(args.catalog), cols, extra)
+        logging.info("loading columns: %s", columns)
+        cat = open_dia(args.catalog, args.cone, columns)
         out = Path(args.out).expanduser()
 
         if args.tile_order is None:
@@ -127,7 +136,8 @@ def run_one(cat, cols, cuts, args, dest: Path, tile):
         try:
             # a tile dir without _DONE is a leftover from an interrupted run: safe to replace
             result.to_hats(dest, catalog_name=dest.name, overwrite=tile is not None)
-            n = hats.read_hats(dest).catalog_info.total_rows
+            written = hats.read_hats(dest)  # a collection (main + margin) in lsdb >= 0.7
+            n = getattr(written, "main_catalog", written).catalog_info.total_rows
         except RuntimeError as err:
             if "empty" not in str(err):
                 raise
@@ -163,6 +173,7 @@ def main(argv=None):
     r.add_argument("--tile-order", type=int, help="loop over all tiles at this order, skipping done ones")
     r.add_argument("--no-select", action="store_true", help="keep all objects (for calibration)")
     r.add_argument("--stats-only", action="store_true", help="drop the nested light curves from the output")
+    r.add_argument("--keep-dia-source", action="store_true", help="also load and keep the nested diaSource column")
     r.add_argument("--min-dia-sources", type=int, default=Cuts.min_dia_sources)
     r.add_argument("--min-epochs", type=int, default=Cuts.min_epochs)
     r.add_argument("--min-sig", type=float, default=Cuts.min_sig)

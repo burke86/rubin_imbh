@@ -24,6 +24,7 @@ def mock_dia(n_const=2000, n_var=50, n_epoch=60, seed=0):
             "dec": rng.uniform(0.0, 1.0, n),
             "nDiaSources": np.r_[rng.integers(0, 6, n_const), rng.integers(5, 20, n_var)],
             "truth_var": np.r_[np.zeros(n_const, bool), np.ones(n_var, bool)],
+            "tract": rng.integers(9000, 9100, n),
         }
     )
     rows = []
@@ -43,11 +44,34 @@ def mock_dia(n_const=2000, n_var=50, n_epoch=60, seed=0):
                     "psfDiffFluxErr": err,
                     "psfFlux": sci + diff,
                     "psfDiffFlux_flag": flag,
+                    "psfFluxErr": err,
+                    "midpointMjdTai": 60800.0 + np.sort(rng.uniform(0, 270, n_epoch)),
+                    "visit": rng.integers(2025_04_01_00000, 2026_01_31_99999, n_epoch),
+                    "diff_PixelFlags_nodataCenter": np.zeros(n_epoch, bool),
+                    "pixelFlags_edge": np.zeros(n_epoch, bool),
                 },
                 index=np.full(n_epoch, i),
             )
         )
     return base, pd.concat(rows)
+
+
+def mock_dia_sources(lc):
+    """Every 5th epoch as a 'detection', standing in for the unused nested diaSource column."""
+    ds = lc.iloc[::5]
+    return pd.DataFrame({"band": ds["band"], "snr": ds["psfDiffFlux"] / ds["psfDiffFluxErr"]}, index=ds.index)
+
+
+def write_hats(nf, path, rows):
+    """Write a mock HATS catalog with at most ~``rows`` objects per partition."""
+    import lsdb
+
+    import inspect
+
+    # renamed in newer lsdb (RSP); older versions swallow unknown kwargs, so check the signature
+    key = "partition_rows" if "partition_rows" in inspect.signature(lsdb.from_dataframe).parameters else "threshold"
+    cat = lsdb.from_dataframe(nf, lowest_order=2, highest_order=9, **{key: rows})
+    cat.to_hats(path, catalog_name=Path(path).name)
 
 
 def test_chi2_to_sigma_null():
@@ -85,9 +109,7 @@ def test_lsdb_end_to_end():
     base, lc = mock_dia(n_const=500, n_var=20)
     nf = npd.NestedFrame(base).add_nested(lc, "diaObjectForcedSource")
     with tempfile.TemporaryDirectory() as tmp:
-        lsdb.from_dataframe(nf, lowest_order=2, highest_order=9, threshold=100).to_hats(
-            Path(tmp) / "mock_dia", catalog_name="mock_dia"
-        )
+        write_hats(nf, Path(tmp) / "mock_dia", rows=100)
         cat = lsdb.open_catalog(Path(tmp) / "mock_dia")
         assert cat.npartitions > 1
         res = select_variables(cat, COLS, Cuts(min_dia_sources=3)).compute()
@@ -108,9 +130,7 @@ def test_tiles_partition_the_catalog():
     nf = npd.NestedFrame(base).add_nested(lc, "diaObjectForcedSource")
     with tempfile.TemporaryDirectory() as tmp:
         # threshold high enough that partitions are coarser than the order-6 tiles
-        lsdb.from_dataframe(nf, lowest_order=2, highest_order=9, threshold=600).to_hats(
-            Path(tmp) / "mock_dia", catalog_name="mock_dia"
-        )
+        write_hats(nf, Path(tmp) / "mock_dia", rows=600)
         cat = lsdb.open_catalog(Path(tmp) / "mock_dia")
         tiles = tile_pixels(cat, 6)
         assert len(tiles) > cat.npartitions
@@ -119,6 +139,28 @@ def test_tiles_partition_the_catalog():
         for pix in tiles:
             ids += select_variables(cat, COLS, cuts, select=False, tile=(6, pix)).compute().diaObjectId.tolist()
         assert sorted(ids) == sorted(base.diaObjectId)
+
+
+def test_needed_columns_prunes_unused_nested_data():
+    import lsdb
+    import nested_pandas as npd
+
+    from rubin_imbh.pipeline import needed_columns, select_variables
+
+    base, lc = mock_dia(n_const=300, n_var=15)
+    nf = npd.NestedFrame(base).add_nested(lc, "diaObjectForcedSource").add_nested(mock_dia_sources(lc), "diaSource")
+    with tempfile.TemporaryDirectory() as tmp:
+        write_hats(nf, Path(tmp) / "mock_dia", rows=100)
+        full = lsdb.open_catalog(Path(tmp) / "mock_dia")
+        columns = needed_columns(full, COLS)
+        assert "diaSource" not in columns and "truth_var" not in columns
+        assert "diaObjectForcedSource.midpointMjdTai" in columns
+        cat = lsdb.open_catalog(Path(tmp) / "mock_dia", columns=columns)
+        assert cat.nested_columns == ["diaObjectForcedSource"]
+        res = select_variables(cat, COLS, Cuts()).compute()
+        assert set(res.diaObjectId) == set(base.diaObjectId[base.truth_var])
+        lc_fields = set(res["diaObjectForcedSource"].nest.fields)
+        assert {"midpointMjdTai", "visit", "psfDiffFlux"} <= lc_fields
 
 
 if __name__ == "__main__":

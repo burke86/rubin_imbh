@@ -31,6 +31,7 @@ class Columns:
     n_dia_sources: str = "nDiaSources"
     flags: tuple[str, ...] = field(
         default=(
+            "diff_PixelFlags_nodataCenter",
             "psfDiffFlux_flag",
             "psfFlux_flag",
             "invalidPsfFlag",

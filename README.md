@@ -52,17 +52,16 @@ git clone https://github.com/burke86/rubin_imbh ~/rubin_imbh
 cd ~/rubin_imbh
 ```
 
-**3. Check the environment and find the data.** Rubin's docs disagree on the path, so
-look for the directory that contains `dia_object_collection`:
+**3. Point at the data.** `/rubin/lsdb_data/dia_object_collection` is a symlink to the
+current release; use the explicit DP2 path so a later release doesn't change it. Set
+`CAT` again in each new terminal.
 
 ```bash
-python -c "import lsdb; print(lsdb.__version__)"
-ls /rubin/lsdb_data /rubin/lsdb_data/dp2 2>/dev/null
-CAT=/rubin/lsdb_data/dp2/dia_object_collection   # adjust to what ls shows
+python -c "import lsdb; print(lsdb.__version__)"     # 0.10.4 as of Oct 2026; tested on 0.6 and 0.10
+CAT=/rubin/lsdb_data/dp2/dia_object_collection
 ```
 
-**4. Inspect the schema.** Nested field and flag names in `Columns` are DP1-based guesses;
-confirm them before any heavy run (a column error here is expected if they differ):
+**4. Inspect the schema** (confirmed against DP2 in Oct 2026; rerun after a new release):
 
 ```bash
 python scripts/select_variables.py --catalog $CAT inspect > inspect.txt
@@ -103,6 +102,13 @@ Each tile is its own HATS catalog; with `--stats-only`/`--no-select` it is a sin
 
 A `CommClosedError` traceback at the very end of a run is dask shutting down its
 workers after the output is written; it is harmless (exit status 0).
+
+### Columns
+
+Only the needed columns are loaded: `diaObjectId`, `ra`, `dec`, `tract`, `nDiaSources`, and
+from the forced-photometry light curve the band, fluxes, errors, flags, `midpointMjdTai`
+and `visit`. The nested `diaSource` column (detections only, ~50 fields) is skipped
+unless `--keep-dia-source` is given; the collection is ~1.1 TB, mostly nested data.
 
 Column names can be overridden with `--lc-column`, `--flux-column`, `--sci-flux-column`.
 Missing flag columns are dropped with a warning; missing required columns raise.
