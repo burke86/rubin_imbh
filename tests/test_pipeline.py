@@ -97,7 +97,7 @@ def test_stats_recover_variables():
     assert 0.05 < np.nanmedian(fvar) < 0.3
     # without the flag cut the outliers make everything "variable"
     st_bad = lightcurve_stats(obj, lc, len(base), COLS, cuts, flags=())
-    assert summarize(st_bad, cuts).isVariable[const].mean() > 0.5
+    assert summarize(st_bad, Cuts(robust=False)).isVariable[const].mean() > 0.5
 
 
 def test_lsdb_end_to_end():
@@ -161,6 +161,24 @@ def test_needed_columns_prunes_unused_nested_data():
         assert set(res.diaObjectId) == set(base.diaObjectId[base.truth_var])
         lc_fields = set(res["diaObjectForcedSource"].nest.fields)
         assert {"midpointMjdTai", "visit", "psfDiffFlux"} <= lc_fields
+
+
+def test_clipped_significance_ignores_single_glitch():
+    """One unflagged outlier epoch inflates varSig but not varSigClip; real variables survive."""
+    base, lc = mock_dia(n_const=1000, n_var=30, seed=3)
+    lc = lc[~lc.psfDiffFlux_flag].copy()  # start clean, then plant one glitch per constant object
+    first_r = ~lc.index.duplicated() & (lc.band == "r").to_numpy()
+    glitch = lc.index.isin(base.diaObjectId[~base.truth_var]) & first_r
+    lc.loc[glitch, "psfDiffFlux"] += 30 * lc.loc[glitch, "psfDiffFluxErr"]
+    obj = lc.index.to_numpy()
+    st = lightcurve_stats(obj, lc, len(base), COLS, Cuts())
+    const, var = ~base.truth_var.to_numpy(), base.truth_var.to_numpy()
+    hit = np.zeros(len(base), bool)
+    hit[lc.index[glitch]] = True
+    assert (st.loc[hit, "r_varSig"] > 5).mean() > 0.9  # naive statistic is fooled
+    assert summarize(st, Cuts()).isVariable[const].mean() < 0.01  # clipped one is not
+    assert summarize(st, Cuts()).isVariable[var].all()
+    assert summarize(st, Cuts(robust=False)).isVariable[hit].mean() > 0.9
 
 
 if __name__ == "__main__":

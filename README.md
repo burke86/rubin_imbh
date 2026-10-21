@@ -20,9 +20,23 @@ CC-IN2P3), so the pipeline runs there; it is tested locally on mock catalogs.
 | `{b}_nEpoch` | epochs passing flag cuts |
 | `{b}_chi2dof` | χ²/dof of `psfDiffFlux` about its weighted mean |
 | `{b}_varSig` | Gaussian-equivalent significance of that χ² (Wilson–Hilferty) |
+| `{b}_chi2dofClip`, `{b}_varSigClip` | same with the single most deviant epoch removed (exact leave-one-out) |
 | `{b}_excessVar` | (var − ⟨σ²⟩) / median(`psfFlux`)², normalized by direct-image flux |
 | `{b}_fvar` | √excessVar (fractional rms) |
-| `nVarBands`, `maxVarSig`, `isVariable` | bands with `varSig ≥ min_sig` and `nEpoch ≥ min_epochs` |
+| `nVarBands`, `maxVarSig`, `isVariable` | over `--select-bands` (default `griz`): bands with `varSigClip ≥ min_sig` and `nEpoch ≥ min_epochs` |
+
+Selection uses the clipped significance so a single unflagged bad epoch cannot make an
+object variable (`--no-robust` reverts to `varSig`). u and y are computed but do not count
+by default: in DP2 they have ~10 epochs and showed no variable/reference separation.
+
+### Calibration (ECDFS, 0.5° cone, Oct 2026)
+
+23.5k DiaObjects; median epochs g/r/i/z = 49/45/86/54, u/y ≈ 9–10. Objects with 1–2
+DIA detections (reference) have median χ²/dof 1.10–1.15 in griz against ~0.985 expected,
+so errors are underestimated by ~7%: use `--err-scale 1.07`. Objects with ≥3 detections
+have median χ²/dof 3–7 in g/i. The reference group's heavy upper tail (mean ≫ median)
+is what motivated the clipped statistic. ECDFS is a deep-drilling field; wide-survey areas
+have far fewer epochs, so revisit `--min-epochs` there.
 
 `excessVar` is diluted by host light because `psfFlux` includes the galaxy, which
 matters for dwarf hosts.
@@ -68,12 +82,12 @@ python scripts/select_variables.py --catalog $CAT inspect > inspect.txt
 cat inspect.txt
 ```
 
-**5. Calibrate on a small field** (0.5° radius in Stripe 82): statistics for every object,
+**5. Calibrate on a small field** (0.5° radius on ECDFS, a deep-drilling field; DP2 barely covers Stripe 82): statistics for every object,
 no selection, no light curves:
 
 ```bash
-python scripts/select_variables.py --catalog $CAT run --cone 28.5 0.4 1800 \
-    --no-select --stats-only --n-workers 4 --memory-limit 6GB \
+python scripts/select_variables.py --catalog $CAT run --cone 53.13 -28.10 1800 \
+    --no-select --stats-only --min-dia-sources 0 --n-workers 4 --memory-limit 6GB \
     --out ~/test_cone_stats.parquet
 ```
 
@@ -85,7 +99,7 @@ null sits at 1. Keep `--n-workers × --memory-limit` within the server size.
 
 ```bash
 python scripts/select_variables.py --catalog $CAT tiles --order 3     # preview
-python scripts/select_variables.py --catalog $CAT run --err-scale 1.15 \
+python scripts/select_variables.py --catalog $CAT run --err-scale 1.07 \
     --tile-order 3 --n-workers 8 --out ~/rubin_imbh/dp2_variables
 ```
 

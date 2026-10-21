@@ -72,6 +72,8 @@ def cmd_run(args):
         min_bands=args.min_bands,
         err_scale=args.err_scale,
         sys_frac=args.sys_frac,
+        select_bands=tuple(args.select_bands),
+        robust=not args.no_robust,
     )
     logging.info("columns: %s", cols)
     logging.info("cuts: %s", cuts)
@@ -180,6 +182,8 @@ def main(argv=None):
     r.add_argument("--min-bands", type=int, default=Cuts.min_bands)
     r.add_argument("--err-scale", type=float, default=Cuts.err_scale)
     r.add_argument("--sys-frac", type=float, default=Cuts.sys_frac)
+    r.add_argument("--select-bands", default="".join(Cuts.select_bands), help="bands that count toward selection")
+    r.add_argument("--no-robust", action="store_true", help="select on varSig instead of varSigClip")
     r.add_argument("--lc-column", default=Columns.lc)
     r.add_argument("--flux-column", default=Columns.flux, help="error column is <name>Err")
     r.add_argument("--sci-flux-column", default=Columns.sci_flux)

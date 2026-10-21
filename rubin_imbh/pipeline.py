@@ -87,7 +87,7 @@ def add_variability(nf, cols: Columns, cuts: Cuts, select: bool = True, bands=BA
     obj = np.repeat(np.arange(len(nf)), lengths)
     flat = lc.nest.to_flat()
     stats = lightcurve_stats(obj, flat, len(nf), cols, cuts, flags=cols.flags, bands=bands)
-    stats = pd.concat([stats, summarize(stats, cuts, bands)], axis=1)
+    stats = pd.concat([stats, summarize(stats, cuts)], axis=1)
     stats.index = nf.index
     out = nf.assign(**{c: stats[c] for c in stats.columns})
     if select:

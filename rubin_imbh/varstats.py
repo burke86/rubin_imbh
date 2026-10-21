@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 BANDS = tuple("ugrizy")
-STATS = ("nEpoch", "chi2dof", "varSig", "excessVar", "fvar")
+STATS = ("nEpoch", "chi2dof", "varSig", "chi2dofClip", "varSigClip", "excessVar", "fvar")
 
 
 @dataclass(frozen=True)
@@ -53,6 +53,10 @@ class Cuts:
     min_bands: int = 1  # number of bands that must pass min_sig
     err_scale: float = 1.0  # multiplicative error rescaling (calibrate on a test field)
     sys_frac: float = 0.0  # systematic floor as a fraction of |direct-image flux|
+    # bands that count toward selection; stats are still computed for all of BANDS.
+    # u and y have ~10 epochs in DP2 and showed no variable/reference separation (ECDFS)
+    select_bands: tuple[str, ...] = tuple("griz")
+    robust: bool = True  # select on varSigClip (most deviant epoch dropped) instead of varSig
 
 
 def chi2_to_sigma(chi2: np.ndarray, dof: np.ndarray) -> np.ndarray:
@@ -138,6 +142,19 @@ def lightcurve_stats(
     dof = n - 1.0
     # chi^2 about the weighted mean, written in moment form so it groups cleanly
     chi2 = np.maximum(agg["swf2"] - agg["swf"] ** 2 / agg["sw"], 0.0).to_numpy()
+
+    # Leave-one-out chi^2 without each light curve's most deviant epoch, so a single
+    # unflagged glitch cannot make an object "variable". Exact: the dropped epoch's
+    # moments are subtracted and the mean recomputed.
+    mean = g["wf"].transform("sum") / g["w"].transform("sum")
+    df = df.assign(r2=df["w"] * (df["f"] - mean) ** 2)
+    worst = df.loc[df.groupby(["obj", "band"], sort=False, observed=True)["r2"].idxmax().reindex(agg.index)]
+    sw_c = agg["sw"].to_numpy() - worst["w"].to_numpy()
+    swf_c = agg["swf"].to_numpy() - worst["wf"].to_numpy()
+    swf2_c = agg["swf2"].to_numpy() - worst["wf2"].to_numpy()
+    dof_c = n - 2.0
+    with np.errstate(divide="ignore", invalid="ignore"):
+        chi2_c = np.maximum(swf2_c - swf_c**2 / sw_c, 0.0)
     xs = ((agg["var_f"] - agg["mean_e2"]) / agg["med_s"] ** 2).to_numpy()
     with np.errstate(divide="ignore", invalid="ignore"):
         out = pd.DataFrame(
@@ -145,6 +162,8 @@ def lightcurve_stats(
                 "nEpoch": agg["n"].to_numpy(),
                 "chi2dof": np.where(dof > 0, chi2 / dof, np.nan),
                 "varSig": chi2_to_sigma(chi2, dof),
+                "chi2dofClip": np.where(dof_c > 0, chi2_c / dof_c, np.nan),
+                "varSigClip": chi2_to_sigma(chi2_c, dof_c),
                 "excessVar": xs,
                 "fvar": np.sqrt(np.clip(xs, 0.0, None)),
             },
@@ -159,9 +178,11 @@ def lightcurve_stats(
     return wide
 
 
-def summarize(stats: pd.DataFrame, cuts: Cuts, bands: tuple[str, ...] = BANDS) -> pd.DataFrame:
-    """Cross-band summary: number of significantly variable bands and best significance."""
-    sig = np.column_stack([stats[f"{b}_varSig"].to_numpy(dtype=float) for b in bands])
+def summarize(stats: pd.DataFrame, cuts: Cuts) -> pd.DataFrame:
+    """Cross-band summary over ``cuts.select_bands``: variable band count and best significance."""
+    bands = cuts.select_bands
+    key = "varSigClip" if cuts.robust else "varSig"
+    sig = np.column_stack([stats[f"{b}_{key}"].to_numpy(dtype=float) for b in bands])
     nep = np.column_stack([stats[f"{b}_nEpoch"].to_numpy() for b in bands])
     usable = nep >= cuts.min_epochs
     sig = np.where(usable, sig, np.nan)
