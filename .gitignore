@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+dask-worker-space/
+*.parquet
+dp2_variables/
