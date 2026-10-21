@@ -39,9 +39,9 @@ def tail_stats(df: pd.DataFrame, sig: float = 4.0) -> pd.DataFrame:
 
 def match_environment(dia_ra, dia_dec, obj: pd.DataFrame, ra_col: str, dec_col: str,
                       ext_col: str | None, bright_flux_col: str | None, bright_njy: float,
-                      match_arcsec: float = 1.0) -> pd.DataFrame:
-    """Nearest Object within ``match_arcsec`` (its extendedness) and distance to the nearest
-    bright point source, for each DiaObject."""
+                      match_arcsec: float = 1.0, color_cols: tuple[str, str] | None = None) -> pd.DataFrame:
+    """Nearest Object within ``match_arcsec`` (its extendedness and optional colour) and
+    distance to the nearest bright point source, for each DiaObject."""
     import astropy.units as u
     from astropy.coordinates import SkyCoord
 
@@ -52,6 +52,11 @@ def match_environment(dia_ra, dia_dec, obj: pd.DataFrame, ra_col: str, dec_col: 
     if ext_col is not None:
         ext = obj[ext_col].to_numpy(dtype=float)[idx]
         out["extendedness"] = np.where(out["sep_obj"] <= match_arcsec, ext, np.nan)
+    if color_cols is not None:
+        f1, f2 = (obj[c].to_numpy(dtype=float)[idx] for c in color_cols)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            color = -2.5 * np.log10(f1 / f2)
+        out["color"] = np.where(out["sep_obj"] <= match_arcsec, color, np.nan)
     if bright_flux_col is not None:
         bright = obj[bright_flux_col].to_numpy(dtype=float) > bright_njy
         if ext_col is not None:

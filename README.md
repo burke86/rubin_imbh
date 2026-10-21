@@ -73,6 +73,19 @@ and not visit-coherent; `scripts/diagnose_objects.py` tests airmass correlation 
 morphology (galaxy residuals), bright-star proximity, and whether flags are driven by a
 few outlier epochs.
 
+`diagnose_objects.py` on ECDFS (Oct 2026):
+- **Bright stars**: reference DiaObjects within 2″ of an r<18 point source are flagged
+  91–100%, at 2–10″ 38–62%, beyond 10″ 2–12%. The 0–10″ zone holds ~8% of reference
+  objects but 40–60% of their false positives.
+- **No coadd counterpart**: only 24% of DiaObjects have an Object within 1″.
+- **Morphology**: extended reference objects are the cleanest (flagged 0.9% z, 2.2% r,
+  4.3% i, 7.7% g), below point-like ones; galaxy subtraction residuals are not the issue.
+- **Airmass**: 52% of flagged g-band reference objects have |corr(z, airmass)| > 0.3 vs 10%
+  of unflagged (weaker in i, r, z); per-visit offsets are tiny, so it is object-dependent,
+  plausibly colour-dependent (DCR or second-order extinction).
+- **Tails**: the top 10% of objects carry ~89% of 4σ outliers; removing all |z|>4 epochs
+  rescues only 20–42% of flags.
+
 A floor of a few percent of the *total* direct-image flux limits sensitivity to low-amplitude,
 host-diluted variability, which is exactly the dwarf-AGN regime, so keep it as low as the
 data allow. ECDFS is a deep-drilling field; wide-survey areas

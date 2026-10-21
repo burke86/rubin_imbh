@@ -47,6 +47,54 @@ def table(mask_groups: dict, flagged: pd.Series) -> pd.DataFrame:
     return pd.DataFrame(rows, index=["n", "frac_flagged"]).T
 
 
+def cut_sequence(b, ref, var, flag, mag, env, args, tb):
+    """Reference false-positive rate and variable retention as environment cuts are applied."""
+    area = np.pi * (args.cone[2] / 3600.0) ** 2
+    e, dmin = env["extendedness"].to_numpy(), env["d_bright"].to_numpy()
+    far = dmin > args.veto_arcsec
+    matched = ~np.isnan(e)
+    stages = {
+        "all": np.ones_like(ref),
+        f"bright-star veto (>{args.veto_arcsec:g}\")": far,
+        "+ Object within 1\"": far & matched,
+        "+ extended": far & matched & (e >= 0.5),
+        "+ point-like": far & matched & (e < 0.5),
+    }
+    rows = {}
+    for k, m in stages.items():
+        r, v = ref & m, var & m
+        rows[k] = (int(r.sum()), flag[r].mean() if r.sum() else np.nan, (flag & r).sum() / area,
+                   int(v.sum()), flag[v].mean() if v.sum() else np.nan)
+    print(f"  cut sequence (cone area {area:.2f} deg^2):\n" + pd.DataFrame(
+        rows, index=["n_ref", "ref_flagged", "ref_flagged_per_deg2", "n_var(>5)", "var_flagged"]).T.round(3).to_string())
+
+    rows = {}
+    for lo, hi in [(-np.inf, 19), (19, 21), (21, 23), (23, 25)]:
+        mm = (mag > lo) & (mag <= hi)
+        for label, sel in (("extended", stages["+ extended"]), ("point", stages["+ point-like"])):
+            r, v = ref & sel & mm, var & sel & mm
+            rows[(f"{lo}-{hi}", label)] = (int(r.sum()), flag[r].mean() if r.sum() >= 10 else np.nan,
+                                           int(v.sum()), flag[v].mean() if v.sum() >= 10 else np.nan)
+    print("  after veto + Object match, by magnitude:\n" + pd.DataFrame(
+        rows, index=["n_ref", "ref_flagged", "n_var", "var_flagged"]).T.round(3).to_string())
+
+    # colour test of the airmass correlation (DCR / colour-dependent extinction predict that
+    # the sign of corr(z, airmass) follows colour)
+    if "color" in env and "r_airmass" in tb:
+        r_am = tb["r_airmass"].to_numpy()
+        c = env["color"].to_numpy()
+        sel = ref & far & matched & np.isfinite(c) & np.isfinite(r_am)
+        if sel.sum() >= 30:
+            x = pd.DataFrame({"color": c[sel], "r": r_am[sel], "flag": flag[sel]})
+            rho_all = x["color"].corr(x["r"], method="spearman")
+            rho_fl = x[x.flag]["color"].corr(x[x.flag]["r"], method="spearman") if x.flag.sum() >= 30 else np.nan
+            x["tercile"] = pd.qcut(x["color"], 3, labels=["blue", "mid", "red"])
+            t = x.groupby("tercile", observed=True).agg(n=("r", "size"), g_i=("color", "median"),
+                                                        median_signed_r=("r", "median"), flagged=("flag", "mean"))
+            print(f"  airmass vs colour (g-i), matched reference objects: Spearman(colour, signed r) "
+                  f"all {rho_all:.2f}, flagged {rho_fl:.2f}\n" + t.round(3).to_string())
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--catalog", default="/rubin/lsdb_data/dp2/dia_object_collection")
@@ -55,6 +103,7 @@ def main(argv=None):
     p.add_argument("--cone", nargs=3, type=float, required=True, metavar=("RA", "DEC", "RADIUS_ARCSEC"))
     p.add_argument("--err-scale", type=float, default=1.07)
     p.add_argument("--bright-star-mag", type=float, default=18.0)
+    p.add_argument("--veto-arcsec", type=float, default=10.0, help="bright-star veto radius")
     args = p.parse_args(argv)
     pd.set_option("display.width", 200)
     ra0, dec0, rad = args.cone
@@ -81,11 +130,13 @@ def main(argv=None):
         ra_c, dec_c = info.ra_column, info.dec_column
         ext_c = pick(allc, "refExtendedness", "r_extendedness", "i_extendedness", contains="xtendedness")
         flux_c = pick(allc, "r_psfFlux", "i_psfFlux")
-        load = [c for c in dict.fromkeys([ra_c, dec_c, ext_c, flux_c]) if c]
+        g_c, i_c = pick(allc, "g_psfFlux"), pick(allc, "i_psfFlux")
+        color_cols = (g_c, i_c) if g_c and i_c else None
+        load = [c for c in dict.fromkeys([ra_c, dec_c, ext_c, flux_c, g_c, i_c]) if c]
         print(f"object catalog columns used: {load}")
         obj = lsdb.open_catalog(UPath(args.object_catalog), search_filter=search, columns=load).compute()
         env = match_environment(nf["ra"].to_numpy(), nf["dec"].to_numpy(), obj, ra_c, dec_c, ext_c, flux_c,
-                                mag_to_njy(args.bright_star_mag))
+                                mag_to_njy(args.bright_star_mag), color_cols=color_cols)
         print(f"Objects in cone: {len(obj)}; DiaObjects matched within 1\": {(env.sep_obj <= 1).mean():.2f}")
 
     for b in BANDS:
@@ -131,6 +182,9 @@ def main(argv=None):
                           for lo, hi in [(-1, 2), (2, 10), (10, 30), (30, 60), (60, np.inf)]}
                 print(f"  by distance to nearest r<{args.bright_star_mag} point source, reference "
                       f"(0-2\" is the star itself):\n" + table(groups, flag).round(3).to_string())
+
+        if env is not None and "extendedness" in env and "d_bright" in env:
+            cut_sequence(b, ref, var, flag.to_numpy(), mag, env, args, tb)
 
         # magnitude dependence of the rescue, to see whether tails explain the faint excess
         rows = {}
