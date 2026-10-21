@@ -107,12 +107,17 @@ def bin_nightly(df: pd.DataFrame, flux: str = "f") -> pd.DataFrame:
     return out
 
 
-def frac5_by_mag(df, n_obj, groups, mag_bins, flux="f", min_epochs=10, sig=5.0, bands="griz"):
-    """Fraction of objects with varSigClip >= sig, per band, detection group and magnitude bin."""
+def stats_from_flat(df: pd.DataFrame, n_obj: int, flux: str = "f", bands: str = "griz") -> pd.DataFrame:
+    """``lightcurve_stats`` on a flattened table whose errors are already scaled."""
     cols = Columns(flux="_flux", flux_err="_err", sci_flux="_sci", band="band", flags=())
     flat = pd.DataFrame({"band": df["band"].to_numpy(), "_flux": df[flux].to_numpy(),
                          "_err": df["e"].to_numpy(), "_sci": df["s"].to_numpy()})
-    st = lightcurve_stats(df["obj"].to_numpy(), flat, n_obj, cols, Cuts(err_scale=1.0), bands=tuple(bands))
+    return lightcurve_stats(df["obj"].to_numpy(), flat, n_obj, cols, Cuts(err_scale=1.0), bands=tuple(bands))
+
+
+def frac5_by_mag(df, n_obj, groups, mag_bins, flux="f", min_epochs=10, sig=5.0, bands="griz"):
+    """Fraction of objects with varSigClip >= sig, per band, detection group and magnitude bin."""
+    st = stats_from_flat(df, n_obj, flux, bands)
     rows = {}
     for b in bands:
         ok = st[f"{b}_nEpoch"] >= min_epochs

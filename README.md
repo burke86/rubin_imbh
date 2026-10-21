@@ -14,6 +14,7 @@ CC-IN2P3), so the pipeline runs there; it is tested locally on mock catalogs.
 - `scripts/diagnose_cone.py` — false-positive diagnostics for a calibration cone
 - `scripts/fit_floor.py` — per-band `--sys-frac` from a calibration cone, without rerunning
 - `scripts/diagnose_visits.py` — per-visit offsets, bad visits and same-night correlation on one cone (`rubin_imbh/visits.py`)
+- `scripts/diagnose_objects.py` — outlier tails, airmass correlation, morphology and bright-star proximity of false positives (`rubin_imbh/objects.py`)
 - `scripts/simulate_clip_null.py` — regenerates the null table for `varSigClip`
 - `tests/test_pipeline.py` — mock-data tests (`python tests/test_pipeline.py`)
 
@@ -62,6 +63,15 @@ subtractions, per-visit zeropoint offsets shared by all objects in an exposure),
 `scripts/diagnose_visits.py` measures from the reference ensemble. Per-visit offsets can
 be *removed* (ensemble correction) rather than absorbed into inflated errors, which keeps
 sensitivity to low-amplitude variability.
+
+`diagnose_visits.py` on ECDFS rejects the visit hypothesis: coherent per-visit offsets are
+only 0.1–0.2%, no visit has excess core scatter (robust sd 1.01–1.18), and removing offsets,
+dropping visits or nightly binning barely changes the false-positive rate. Instead every
+visit has heavy tails: 1.6–4.6% of reference epochs beyond 4σ (Gaussian: 0.006%), worst
+in g then i, matching the false-positive ordering. So the excess is per-object, per-epoch
+and not visit-coherent; `scripts/diagnose_objects.py` tests airmass correlation (DCR),
+morphology (galaxy residuals), bright-star proximity, and whether flags are driven by a
+few outlier epochs.
 
 A floor of a few percent of the *total* direct-image flux limits sensitivity to low-amplitude,
 host-diluted variability, which is exactly the dwarf-AGN regime, so keep it as low as the
