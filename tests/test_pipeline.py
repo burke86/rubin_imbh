@@ -218,6 +218,33 @@ def test_per_band_sys_frac_suppresses_bright_floor():
     assert np.allclose(st0.r_varSigClip, st1.r_varSigClip, equal_nan=True)  # other bands untouched
 
 
+def test_visit_offsets_are_recovered_and_removed():
+    """Coherent per-visit zeropoint offsets are measured from bright reference objects."""
+    from rubin_imbh.visits import add_residuals, apply_visit_offsets, frac5_by_mag, mag_to_njy, visit_table
+
+    rng = np.random.default_rng(21)
+    n_obj, n_vis = 800, 40
+    off = rng.normal(0, 0.02, n_vis)
+    flux = 10 ** ((31.4 - rng.uniform(17, 24, n_obj)) / 2.5)
+    obj = np.repeat(np.arange(n_obj), n_vis)
+    visit = np.tile(np.arange(n_vis), n_obj)
+    e = np.full(len(obj), 120.0)
+    f = rng.normal(0, e) + off[visit] * flux[obj]
+    df = pd.DataFrame({"obj": obj, "nDia": 1, "band": "r", "visit": visit, "mjd": 61000.0 + visit,
+                       "night": visit, "f": f, "e": e, "s": flux[obj] + f})
+    df = add_residuals(df)
+    ref = np.ones(len(df), bool)
+    bright = (df.F.abs() > mag_to_njy(21)).to_numpy()
+    vt = visit_table(df, ref, bright)
+    # offsets are relative to each object's mean, i.e. recovered up to the mean offset
+    assert np.allclose(vt.off_frac.to_numpy(), off - off.mean(), atol=0.002)
+    df["f_off"] = apply_visit_offsets(df, vt)
+    groups = {"all": np.ones(n_obj, bool)}
+    raw, _ = frac5_by_mag(df, n_obj, groups, [-np.inf, 21, 25], bands="r")
+    cor, _ = frac5_by_mag(df, n_obj, groups, [-np.inf, 21, 25], flux="f_off", bands="r")
+    assert raw[("r", "all", "-inf-21")] > 0.9 and cor[("r", "all", "-inf-21")] < 0.02
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

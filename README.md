@@ -13,6 +13,7 @@ CC-IN2P3), so the pipeline runs there; it is tested locally on mock catalogs.
 - `scripts/select_variables.py` — CLI (`inspect`, `tiles`, `run`)
 - `scripts/diagnose_cone.py` — false-positive diagnostics for a calibration cone
 - `scripts/fit_floor.py` — per-band `--sys-frac` from a calibration cone, without rerunning
+- `scripts/diagnose_visits.py` — per-visit offsets, bad visits and same-night correlation on one cone (`rubin_imbh/visits.py`)
 - `scripts/simulate_clip_null.py` — regenerates the null table for `varSigClip`
 - `tests/test_pipeline.py` — mock-data tests (`python tests/test_pipeline.py`)
 
@@ -52,6 +53,15 @@ DiaObjects exist because of these residuals. `scripts/fit_floor.py` picks per-ba
 from the same parquet. Separately, i band at 21–23 mag has reference median χ²/dof ≈ 1.6,
 which a flux-proportional floor cannot fix; possibly correlated same-night visits in the
 deep-drilling sequences (to check by nightly binning).
+
+`fit_floor.py` on v3: a 1.5–2% floor (2.5% in g) removes nearly all bright >5-detection
+"variables" (they are residuals), but bright 1–2-detection objects stay flagged even at a
+5% floor, and the 21–25 mag excess (g ~27%, i ~31%) does not respond at all. So the
+excess is not a single per-object floor. Leading hypothesis: visit-level problems (bad
+subtractions, per-visit zeropoint offsets shared by all objects in an exposure), which
+`scripts/diagnose_visits.py` measures from the reference ensemble. Per-visit offsets can
+be *removed* (ensemble correction) rather than absorbed into inflated errors, which keeps
+sensitivity to low-amplitude variability.
 
 A floor of a few percent of the *total* direct-image flux limits sensitivity to low-amplitude,
 host-diluted variability, which is exactly the dwarf-AGN regime, so keep it as low as the
