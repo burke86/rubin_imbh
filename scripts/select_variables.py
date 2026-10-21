@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import time
 from pathlib import Path
 
 import hats
@@ -139,13 +140,17 @@ def cmd_run(args):
 
         tiles = tile_pixels(cat, args.tile_order)
         out.mkdir(parents=True, exist_ok=True)
-        for i, pix in enumerate(tiles, 1):
+        todo = [p for p in tiles if not (out / f"o{args.tile_order}_p{p}" / DONE).exists()]
+        logging.info("%d tiles, %d already done, %d to run", len(tiles), len(tiles) - len(todo), len(todo))
+        t_start = time.time()
+        for i, pix in enumerate(todo, 1):
             dest = out / f"o{args.tile_order}_p{pix}"
-            if (dest / DONE).exists():
-                logging.info("[%d/%d] %s already done, skipping", i, len(tiles), dest.name)
-                continue
-            logging.info("[%d/%d] %s", i, len(tiles), dest.name)
+            t0 = time.time()
+            logging.info("[%d/%d] %s", i, len(todo), dest.name)
             run_one(cat, cols, cuts, args, dest, (args.tile_order, pix), env)
+            per = (time.time() - t_start) / i
+            logging.info("[%d/%d] %s took %.0f s; mean %.0f s/tile, ~%.1f h remaining",
+                         i, len(todo), dest.name, time.time() - t0, per, per * (len(todo) - i) / 3600)
 
 
 DONE = "_DONE"
