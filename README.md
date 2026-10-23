@@ -37,6 +37,7 @@ CC-IN2P3), so the pipeline runs there; it is tested locally on mock catalogs.
 | `{b}_medFlux`, `{b}_rmsErr` | median direct-image flux (nJy, includes host) and rms per-epoch error after rescaling |
 | `{b}_chi2dof` | χ²/dof of `psfDiffFlux` about its weighted mean |
 | `{b}_varSig` | Gaussian-equivalent significance of that χ² (Wilson–Hilferty) |
+| `{b}_worstZ` | signed significance of the epoch (or night) the leave-one-out removes; added-light artefacts such as asteroids are positive |
 | `{b}_chi2dofClip`, `{b}_varSigClip` | same with the single most deviant epoch removed (exact leave-one-out); `varSigClip` is standardized against the simulated null of this statistic (`scripts/simulate_clip_null.py`), since dropping the largest residual biases χ² low |
 | `{b}_excessVar` | (var − ⟨σ²⟩) / median(`psfFlux`)², normalized by direct-image flux |
 | `{b}_fvar` | √excessVar (fractional rms) |

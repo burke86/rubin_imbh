@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 BANDS = tuple("ugrizy")
-STATS = ("nEpoch", "medFlux", "rmsErr", "chi2dof", "varSig", "chi2dofClip", "varSigClip", "excessVar", "fvar")
+STATS = ("nEpoch", "medFlux", "rmsErr", "chi2dof", "varSig", "chi2dofClip", "varSigClip", "worstZ", "excessVar", "fvar")
 
 
 @dataclass(frozen=True)
@@ -343,6 +343,10 @@ def lightcurve_stats(
     r2k = np.zeros(K)
     wk[key[first]] = w[first]
     r2k[key[first]] = r2[first]
+    # signed significance of the epoch/night the leave-one-out removes: asteroids and other
+    # added-light artefacts are positive, subtraction systematics either sign
+    worst_z = np.full(K, np.nan)
+    worst_z[key[first]] = d[first] * np.sqrt(w[first])
     with np.errstate(divide="ignore", invalid="ignore"):
         chi2_c = np.maximum(chi2 - r2k * sw / (sw - wk), 0.0)
         dof, dof_c = n - 1.0, n - 2.0
@@ -355,6 +359,7 @@ def lightcurve_stats(
             "varSig": chi2_to_sigma(chi2, dof),
             "chi2dofClip": np.where(dof_c > 0, chi2_c / dof_c, np.nan),
             "varSigClip": clip_chi2_to_sigma(chi2_c, n),
+            "worstZ": worst_z,
             "excessVar": xs,
             "fvar": np.sqrt(np.clip(xs, 0.0, None)),
         }
