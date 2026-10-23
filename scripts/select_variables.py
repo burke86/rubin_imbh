@@ -148,6 +148,11 @@ def cmd_run(args):
             return
 
         tiles = tile_pixels(cat, args.tile_order)
+        if args.min_abs_b:
+            b = tile_galactic_latitude(tiles, args.tile_order)
+            skipped = [t for t, bb in zip(tiles, b) if abs(bb) < args.min_abs_b]
+            tiles = [t for t, bb in zip(tiles, b) if abs(bb) >= args.min_abs_b]
+            logging.info("skipping %d tiles with |b| < %g deg at their centre: %s", len(skipped), args.min_abs_b, skipped)
         out.mkdir(parents=True, exist_ok=True)
         todo = [p for p in tiles if not (out / f"o{args.tile_order}_p{p}" / DONE).exists()]
         logging.info("%d tiles, %d already done, %d to run", len(tiles), len(tiles) - len(todo), len(todo))
@@ -163,6 +168,17 @@ def cmd_run(args):
 
 
 DONE = "_DONE"
+
+
+def tile_galactic_latitude(tiles, order):
+    """Galactic latitude (deg) of each HEALPix tile centre."""
+    import astropy.units as u
+    import cdshealpix.nested as cn
+    import numpy as np
+    from astropy.coordinates import SkyCoord
+
+    lon, lat = cn.healpix_to_lonlat(np.asarray(tiles, dtype=np.uint64), order)
+    return SkyCoord(lon, lat).galactic.b.to(u.deg).value
 
 
 def load_environment(args, out: Path, object_catalog: str):
@@ -278,6 +294,8 @@ def main(argv=None):
     r.add_argument("--cone", nargs=3, type=float, metavar=("RA", "DEC", "RADIUS_ARCSEC"))
     r.add_argument("--tile", nargs=2, type=int, metavar=("ORDER", "PIXEL"), help="run one HEALPix tile")
     r.add_argument("--tile-order", type=int, help="loop over all tiles at this order, skipping done ones")
+    r.add_argument("--min-abs-b", type=float, default=0.0,
+                   help="with --tile-order: skip tiles whose centre is within this Galactic latitude (deg)")
     r.add_argument("--no-select", action="store_true", help="keep all objects (for calibration)")
     r.add_argument("--stats-only", action="store_true", help="drop the nested light curves from the output")
     r.add_argument("--prefilter", help="pandas query on top-level columns before any light curve is read, "
