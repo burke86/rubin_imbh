@@ -110,6 +110,7 @@ def cmd_run(args):
         combo_bands=tuple(args.combo_bands),
         combined=args.combined,
         min_combo_dof=args.min_combo_dof,
+        nightly=not args.no_nightly,
     )
     logging.info("source: %s   catalog: %s", args.source, args.catalog)
     logging.info("columns: %s", cols)
@@ -291,6 +292,8 @@ def main(argv=None):
                    help="bands in the combined-band chi^2 for sparse (WFD) light curves")
     r.add_argument("--combined", choices=["either", "only", "off"], default=Cuts.combined,
                    help="either: per-band OR combined criterion; only: combined; off: per band only")
+    r.add_argument("--no-nightly", action="store_true",
+                   help="use individual epochs instead of nightly means (single-night artefacts then count)")
     r.add_argument("--min-combo-dof", type=int, default=Cuts.min_combo_dof,
                    help="minimum sum over combo bands of (epochs - 1)")
     r.add_argument("--lc-column", help="nested light-curve column (default: auto-detected)")

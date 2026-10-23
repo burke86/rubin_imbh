@@ -45,6 +45,8 @@ def needed_columns(catalog, cols: Columns, extra: tuple[str, ...] = (), keep_lc:
     top = [c for c in dict.fromkeys(want) if c and c in allc]
     fields = nested_fields(catalog, cols.lc)
     lc = [cols.band, cols.flux, cols.flux_err, cols.sci_flux, *cols.flags]
+    if cols.time in fields:
+        lc.append(cols.time)  # needed for nightly binning, not only for the output
     if keep_lc:
         lc += [f for f in KEEP_LC if f in fields]
     return top + [f"{cols.lc}.{f}" for f in dict.fromkeys(lc)] + list(extra)
@@ -112,7 +114,11 @@ def add_variability(nf, cols: Columns, cuts: Cuts, select: bool = True, bands=BA
     if tile is not None:
         # a partition coarser than the tile spans several tiles; keep only this tile's rows
         nf = nf.iloc[np.flatnonzero(in_tile(nf, tile))]
-    fields = list(dict.fromkeys([cols.band, cols.flux, cols.flux_err, cols.sci_flux, *cols.flags]))
+    present = set(nf[cols.lc].nest.fields) if hasattr(nf[cols.lc].nest, "fields") else set()
+    fields = [cols.band, cols.flux, cols.flux_err, cols.sci_flux, *cols.flags]
+    if cols.time in present:
+        fields.append(cols.time)
+    fields = list(dict.fromkeys(fields))
     parts = []
     for a in range(0, max(len(nf), 1), chunk_objects):
         lc = nf[cols.lc].iloc[a : a + chunk_objects]

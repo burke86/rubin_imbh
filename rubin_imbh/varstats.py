@@ -33,6 +33,7 @@ class Columns:
     sci_flux: str = "psfFlux"  # direct-image flux, used to normalize excess variance
     obj_id: str = "diaObjectId"
     n_dia_sources: str | None = "nDiaSources"  # None: no DIA detection count (object_collection)
+    time: str = "midpointMjdTai"  # epoch time, used to bin epochs by night
     flags: tuple[str, ...] = field(
         default=(
             "diff_PixelFlags_nodataCenter",
@@ -76,6 +77,11 @@ class Cuts:
     combo_bands: tuple[str, ...] = tuple("riz")
     combined: str = "either"
     min_combo_dof: int = 4  # sum over combo bands of (n_b - 1)
+    # Average each band's epochs within a night before any statistic, so the leave-one-out
+    # removes the worst night: single-night artefacts (asteroids crossing an Object, a bad
+    # visit pair) cannot make an object variable, and within-night correlations drop out.
+    # nEpoch then counts nights. Needs the time column; falls back to epochs without it.
+    nightly: bool = True
 
 
 def chi2_to_sigma(chi2: np.ndarray, dof: np.ndarray) -> np.ndarray:
@@ -222,6 +228,36 @@ def band_codes(band: pd.Series, bands: tuple[str, ...]) -> np.ndarray:
     return codes
 
 
+def night_index(mjd: np.ndarray) -> np.ndarray:
+    """Observing night: Rubin's dayObs boundary is 12:00 UTC, i.e. MJD + 0.5 rolls over at noon."""
+    return np.floor(np.asarray(mjd, float) - 0.5)
+
+
+def bin_by_night(key, f, e, s, mjd):
+    """Inverse-variance mean flux per (group key, night); returns night-level key, f, e, s.
+
+    Epochs without a time are kept as their own nights.
+    """
+    night = night_index(mjd)
+    bad_t = ~np.isfinite(night)
+    if bad_t.any():  # unique pseudo-nights far from real ones
+        night = np.where(bad_t, -1e6 - np.arange(len(night)), night)
+    night = night.astype(np.int64)
+    nights, nid = np.unique(night, return_inverse=True)
+    comp = key.astype(np.int64) * len(nights) + nid.ravel()
+    uniq, inv = np.unique(comp, return_inverse=True)
+    inv = inv.ravel()
+    w = 1.0 / e**2
+    sw = np.bincount(inv, weights=w)
+    f_n = np.bincount(inv, weights=w * f) / sw
+    e_n = 1.0 / np.sqrt(sw)
+    finite = np.isfinite(s)
+    cnt = np.bincount(inv, weights=finite.astype(float))
+    with np.errstate(invalid="ignore", divide="ignore"):
+        s_n = np.bincount(inv, weights=np.where(finite, s, 0.0)) / cnt
+    return uniq // len(nights), f_n, e_n, np.where(cnt > 0, s_n, np.nan)
+
+
 def lightcurve_stats(
     obj: np.ndarray,
     flat: pd.DataFrame,
@@ -263,6 +299,10 @@ def lightcurve_stats(
         floor = np.full(len(code), float(cuts.sys_frac))
     if np.any(floor > 0):
         e = np.hypot(e, floor * np.nan_to_num(np.abs(s)))
+    if cuts.nightly and cols.time in flat:
+        t = flat[cols.time].to_numpy(dtype=float, na_value=np.nan)[good]
+        key, f, e, s = bin_by_night(key, f, e, s, t)
+        code = key % nb
     e2 = e**2
     w = 1.0 / e2
     K = n_obj * nb

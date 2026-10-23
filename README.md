@@ -84,6 +84,18 @@ calibrated (mean +0.05σ, sd 1.01) and recovers 37/66/76/83% of objects with 10/
 rms variability with no false positives, so in the WFD it targets large-amplitude
 variability (TDEs, strongly variable AGN), not low-amplitude dwarf AGN.
 
+### Ecliptic contamination and nightly binning (Oct 2026)
+
+The first full-DP2 pass (per-band criterion, epoch-level statistics; 42 of 147 tiles before
+the server stopped) selected 434k objects, dominated by high-latitude tiles on the ecliptic:
+tile 290 (ecliptic latitude +1.8°) 78k, falling to ~1k by |β| ≈ 11° (pilot tile 753 at
+−13.9°: 179). In tile 290, 84% are flagged in a single band and epochs are higher (median
+17/15/6 in r/i/z), consistent with asteroids crossing forced-photometry positions on one
+night (visit pairs defeat a leave-one-epoch-out). Statistics now use **nightly means** by
+default (`Cuts.nightly`, `--no-nightly` to disable): each band's epochs are averaged within a
+night (dayObs boundary 12:00 UTC) before any statistic, so the leave-one-out removes the
+worst night and variability must persist over ≥2 nights. `nEpoch` then counts nights.
+
 ## DIA-source calibration history (Oct 2026)
 
 Everything below up to "What it does" was measured with `--source dia`; the object source

@@ -401,6 +401,37 @@ def test_combined_statistic_null_and_power():
     assert np.isnan(combo_clip_sigma(np.array([3.0]), np.array([[2, 1, 1]]))[0])
 
 
+def test_nightly_binning_removes_single_night_artefacts():
+    """An 'asteroid' hitting both visits of one night fools leave-one-epoch-out but not nightly."""
+    rng = np.random.default_rng(51)
+    n_obj, n_night = 1500, 12
+    rows, truth = [], np.arange(n_obj) < 150
+    for i in range(n_obj):
+        sci = rng.uniform(3e3, 3e4)
+        t = np.repeat(61000.1 + np.sort(rng.choice(120, n_night, replace=False)), 2) + np.tile([0.0, 0.02], n_night)
+        err = 0.02 * sci * rng.uniform(0.8, 1.2, len(t))
+        diff = rng.normal(0, err)
+        if truth[i]:
+            diff += 0.2 * sci * np.sin((t - 61000) / 15.0 + i)  # real, multi-night variability
+        else:
+            hit = rng.integers(n_night)
+            diff[2 * hit : 2 * hit + 2] += 30 * err[2 * hit : 2 * hit + 2]  # one night, both visits
+        rows.append(pd.DataFrame({"band": "r", "psfDiffFlux": diff, "psfDiffFluxErr": err, "psfFlux": sci + diff,
+                                  "midpointMjdTai": t}, index=np.full(len(t), i)))
+    lc = pd.concat(rows)
+    obj = lc.index.to_numpy()
+    per_epoch = summarize(lightcurve_stats(obj, lc, n_obj, COLS, Cuts(nightly=False)), Cuts(nightly=False))
+    nightly_st = lightcurve_stats(obj, lc, n_obj, COLS, Cuts())
+    nightly = summarize(nightly_st, Cuts())
+    assert per_epoch.isVariable[~truth].mean() > 0.9  # two outliers survive leave-one-epoch-out
+    assert nightly.isVariable[~truth].mean() < 0.01
+    assert nightly.isVariable[truth].mean() > 0.95
+    assert (nightly_st.r_nEpoch == n_night).all()  # nEpoch counts nights
+    # without a time column the statistics fall back to epochs
+    st_nt = lightcurve_stats(obj, lc.drop(columns="midpointMjdTai"), n_obj, COLS, Cuts())
+    assert (st_nt.r_nEpoch == 2 * n_night).all()
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
