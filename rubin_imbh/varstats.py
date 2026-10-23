@@ -138,7 +138,8 @@ def clip_chi2_to_sigma(chi2_clip: np.ndarray, n: np.ndarray) -> np.ndarray:
     return np.where(ok, z, np.nan)
 
 
-COMBO_SIM_MAX_EPOCHS = 60  # above this, the single-band table is used (split barely matters)
+COMBO_SIM_MAX_EPOCHS = 20  # above this the single-band table at the same dof is used: the split
+# shifts the null by ~0.1 sigma at 10 epochs but only ~0.003 sigma at 28-40 epochs
 
 
 @lru_cache(maxsize=None)
@@ -226,6 +227,36 @@ def band_codes(band: pd.Series, bands: tuple[str, ...]) -> np.ndarray:
     codes = pd.Categorical(band, categories=list(bands)).codes.astype(float)
     codes[codes < 0] = np.nan
     return codes
+
+
+def group_argmax(g: np.ndarray, v: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Groups present in ``g`` and, for each, the index of its largest ``v`` (first on ties).
+
+    A stable argsort on the integer group id plus ``maximum.reduceat``: much cheaper than a
+    two-key lexsort, which dominated the statistics' run time.
+    """
+    if len(g) == 0:
+        return g[:0], np.zeros(0, np.int64)
+    order = np.argsort(g, kind="stable")
+    gs, vs = g[order], v[order]
+    start = np.flatnonzero(np.r_[True, gs[1:] != gs[:-1]])
+    mx = np.maximum.reduceat(vs, start)
+    gid = np.repeat(np.arange(len(start)), np.diff(np.r_[start, len(gs)]))
+    pos = np.flatnonzero(vs == mx[gid])
+    first = pos[np.r_[True, gid[pos][1:] != gid[pos][:-1]]]
+    return gs[start], order[first]
+
+
+def group_sort_by_value(key: np.ndarray, s: np.ndarray) -> np.ndarray:
+    """Order sorting by integer ``key`` then by ``s`` (NaN last), with one float argsort.
+
+    ``s`` is mapped monotonically into (-0.5, 0.5) by a signed log, so ``key + 0.5 + u``
+    keeps groups apart; values closer than ~1e-9 relative may tie, which is irrelevant for
+    a median.
+    """
+    with np.errstate(invalid="ignore"):
+        u = np.where(np.isfinite(s), np.sign(s) * np.log1p(np.abs(s)) / 44.0, 0.4999)
+    return np.argsort(key + 0.5 + np.clip(u, -0.4998, 0.4999))
 
 
 def night_index(mjd: np.ndarray) -> np.ndarray:
@@ -323,7 +354,7 @@ def lightcurve_stats(
         mean_e2 = gsum(e2) / n
 
     # median direct-image flux per group: sort by (key, s); NaNs sort last within a group
-    order = np.lexsort((s, key))
+    order = group_sort_by_value(key, s)
     ks, ss = key[order], s[order]
     uniq, start = np.unique(ks, return_index=True)
     n_valid = np.bincount(key, weights=np.isfinite(s).astype(float), minlength=K)[uniq].astype(np.int64)
@@ -336,9 +367,7 @@ def lightcurve_stats(
     # Leave-one-out chi^2 without each light curve's most deviant epoch, so a single
     # unflagged glitch cannot make an object "variable". Exact closed form: dropping epoch k
     # lowers chi^2 by w_k d_k^2 * sw / (sw - w_k).
-    order = np.lexsort((-r2, key))
-    ks = key[order]
-    first = order[np.r_[True, ks[1:] != ks[:-1]]] if len(ks) else order
+    _, first = group_argmax(key, r2)
     wk = np.zeros(K)
     r2k = np.zeros(K)
     wk[key[first]] = w[first]
@@ -394,9 +423,7 @@ def combined_stats(cuts, bands, n, chi2, sw, key, code, r2, w, n_obj) -> dict:
     inb = np.isin(code, cb)
     oid = key[inb] // nb
     rr = r2[inb]
-    order = np.lexsort((-rr, oid))
-    os_ = oid[order]
-    first = order[np.r_[True, os_[1:] != os_[:-1]]] if len(os_) else order
+    _, first = group_argmax(oid, rr)
     g = key[inb][first]
     with np.errstate(invalid="ignore", divide="ignore"):
         eff = np.where(n[g] > 1, rr[first] * sw[g] / (sw[g] - w[inb][first]), 0.0)

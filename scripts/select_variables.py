@@ -123,7 +123,12 @@ def cmd_run(args):
 
     from dask.distributed import Client
 
-    with Client(n_workers=args.n_workers, threads_per_worker=1, memory_limit=args.memory_limit) as client:
+    import contextlib
+
+    from dask.distributed import performance_report
+
+    report = performance_report(filename=str(Path(args.profile).expanduser())) if args.profile else contextlib.nullcontext()
+    with Client(n_workers=args.n_workers, threads_per_worker=1, memory_limit=args.memory_limit) as client, report:
         logging.info("dask dashboard: %s", client.dashboard_link)
         # open once for the schema (no data read), then reopen with only the needed columns
         extra = ("diaSource",) if args.keep_dia_source and args.source == "dia" else ()
@@ -309,6 +314,7 @@ def main(argv=None):
     r.add_argument("--bright-stars", help="bright-star parquet cache (default: next to --out)")
     r.add_argument("--chunk-objects", type=int, default=10_000,
                    help="objects per light-curve chunk within a partition (lower to cut peak memory)")
+    r.add_argument("--profile", help="write a dask performance report (HTML) here: where the time goes")
     r.add_argument("--n-workers", type=int, default=4)
     r.add_argument("--memory-limit", default="6GB", help="per worker")
 
