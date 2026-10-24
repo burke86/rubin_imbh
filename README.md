@@ -25,6 +25,7 @@ CC-IN2P3), so the pipeline runs there; it is tested locally on mock catalogs.
 - `scripts/diagnose_visits.py` — per-visit offsets, bad visits and same-night correlation on one cone (`rubin_imbh/visits.py`)
 - `scripts/diagnose_objects.py` — outlier tails, airmass correlation, morphology and bright-star proximity of false positives (`rubin_imbh/objects.py`)
 - `scripts/validate_xray.py` — completeness and X-ray purity against CDF-S 7 Ms / E-CDF-S 250 ks AGN (VizieR)
+- `scripts/summarize_selection.py` — combine a tiled run; counts by tile, latitude, morphology, magnitude, route; sky map
 - `scripts/depth_map.py` — coadd 5σ depth per HEALPix pixel from object_collection; finds DP2's depth layers
 - `scripts/simulate_clip_null.py` — regenerates the null table for `varSigClip`
 - `tests/test_pipeline.py` — mock-data tests (`python tests/test_pipeline.py`)
@@ -303,7 +304,8 @@ grep -E "Traceback|Error" ~/dp2_variables_v2.log | tail -3
 
 Stop with `pkill -f select_variables.py`. If it stops early, rerun the same command: tiles
 with a `_DONE` marker are skipped and a half-written tile is redone (`>>` appends to the log).
-When finished, combine the tiles:
+When finished, combine and summarize the tiles (`python scripts/summarize_selection.py
+~/dp2_variables_v2 --out ~/dp2_variables_v2_all`), or just combine them:
 
 ```bash
 python - <<'PY'
