@@ -27,6 +27,7 @@ CC-IN2P3), so the pipeline runs there; it is tested locally on mock catalogs.
 - `scripts/validate_xray.py` — completeness and X-ray purity against CDF-S 7 Ms / E-CDF-S 250 ks AGN (VizieR)
 - `scripts/summarize_selection.py` — combine a tiled run; counts by tile, latitude, morphology, magnitude, route; sky map
 - `scripts/inspect_lightcurves.py` — light curves of sampled selected objects per tile, and which nights their excursions share
+- `scripts/gaia_flag.py` — Gaia DR3 crossmatch (remote HATS): flags stars (parallax/PM > 5σ), quasar candidates, Gaia variables
 - `scripts/depth_map.py` — coadd 5σ depth per HEALPix pixel from object_collection; finds DP2's depth layers
 - `scripts/simulate_clip_null.py` — regenerates the null table for `varSigClip`
 - `tests/test_pipeline.py` — mock-data tests (`python tests/test_pipeline.py`)
@@ -107,7 +108,9 @@ does not filter on it (767k selected point sources brighter than r = 18 are most
 bright stars). 75% enter only through the combined-band statistic and 86% lie within 10° of
 the ecliptic, including high-Galactic-latitude tiles (761, 764, 759, 758: b = −31 to −45°,
 |β| < 3°; tile 753 at β = −14° has ~2k). Under investigation with `inspect_lightcurves.py`:
-until understood, treat combined-route selections near the ecliptic as unreliable.
+until understood, treat combined-route selections near the ecliptic as unreliable. No Gaia
+star veto had been applied: `gaia_flag.py` adds one (stars, including high-proper-motion stars
+that fake variability in difference images; Gaia quasar candidates are kept).
 
 ## DIA-source calibration history (Oct 2026)
 
