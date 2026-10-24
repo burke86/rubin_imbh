@@ -323,10 +323,39 @@ their L5100 posteriors (10^43–45) track L_X. Variable X-ray AGN (22): median l
 relative to L_X, 68% width 5.9 dex): without variability the photometry hardly constrains
 L_AGN, and the 50%-AGN, flat-in-log-L prior dominates.
 
-Next: close the bright-end sim-to-real gap (cModel colour systematics, emission lines/SED
-library breadth; check per-band colour residuals of bright galaxies with secure spec-z); a
-star class or star rejection; a realistic AGN prior (reweighting, no new simulations); WFD
-validation (e.g. Milliquas quasars); then run on the full variable sample.
+Bright-end diagnosis: matched at fixed redshift, real bright COSMOS galaxies' nearest
+simulated colours differ by |median| ≤ 0.012 mag in every colour, and real colours lie within
+the simulated distribution (median match distance 0.075 mag), so there are no zero-point
+offsets. The median colour offsets (real redder by 0.1–0.3 in u−g and g−r) come from the
+simulation prior's galaxy mix. But real posteriors were ~2× too narrow at r < 23 (half-width
+0.015–0.020 vs NMAD 0.034–0.037), so ~3% of model error was missing.
+
+`npe_v2` (`models/npe_v2`): the same 2×10^6 simulations with coadds redrawn at
+zp_sigma = 0.03 (`scripts/redraw_coadds.py`, seconds, no new SEDs), trained with batch 2048,
+lr 2e-3, patience 5 and 1× ESS resampling: 13 min instead of 2 h (stopped at 48 epochs on a
+noisy validation loss, so possibly under-trained). Stars are now removed (Gaia, `gaia_flag.py`;
+reference stars), and COSMOS includes point sources.
+
+| | COSMOS all (114k) | COSMOS r < 22 | COSMOS 68% coverage | CDF-S spec-z (579) |
+|---|---|---|---|---|
+| npe_v1 (zp 1%) | 0.100 / 31% | 0.035 / 2% | 0.42–0.63 | 0.074 / 24% |
+| npe_v2 (zp 3%) | 0.114 / 32% | 0.038 / 2% | **0.65–0.70** | 0.080 / 26% |
+| DP2 BPZ | 0.121 / 38% | 0.027 / 1% | | 0.062 / 29% |
+
+v2's posteriors are calibrated on real data at the cost of a little point-estimate accuracy.
+COSMOS extended galaxies: 0.108 / 31%; point sources not flagged by Gaia (7.5k; faint stars
+and quasars): 0.205 / 46%.
+
+Population AGN prior (`amortized/agn_prior.py`, reported by `validate_real.py`): an
+Eddington-ratio distribution p(log λ) ∝ λ^−0.65 over 10^−4–10^0.5 (k_bol = 10,
+M_BH = 0.002 M*), a fraction 0.1 (1+z)^3.5 (≤ 0.9) of galaxies, which gives P(λ > 0.01) ≈ 0.5% at
+z = 0 and ≈ 5% at z = 1, applied by importance reweighting of the posterior samples. CDF-S,
+mean P(λ_Edd > 0.01), training → population prior: galaxies that are not X-ray AGN
+0.18 → 0.04, X-ray AGN 0.35 → 0.10, variable X-ray AGN 0.99 → 0.91.
+
+Next: train v2 longer (patience 10, lr 1e-3; ~30 min) or try zp_sigma = 0.02; WFD and
+quasar validation via the clean variable sample (`scripts/attach_object_columns.py` on the
+RSP, then `validate_real.py --reference milliquas`); then run on the full variable sample.
 
 ## DIA-source calibration history (Oct 2026)
 

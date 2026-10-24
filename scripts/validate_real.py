@@ -103,13 +103,13 @@ def main(argv=None):
         obs[f"post_{name}_lo"], obs[f"post_{name}_hi"] = np.percentile(s[:, :, j], [16, 84], axis=1)
     if "log_L5100_erg" in th:
         # the same posteriors under a population AGN prior (Eddington-ratio distribution), by
-        # importance reweighting: columns pop_<theta>_{med,lo,hi}, p_agn_{train,pop} (L5100 > 1e40)
-        from rubin_imbh.amortized.agn_prior import reweight, weighted_quantiles
+        # importance reweighting: columns pop_<theta>_{med,lo,hi}, p_agn_{train,pop} = P(lambda_Edd > 0.01)
+        from rubin_imbh.amortized.agn_prior import EddingtonRatioPrior, reweight, weighted_quantiles
 
         w, ess = reweight(s, th)
         for j, name in enumerate(th):
             obs[f"pop_{name}_lo"], obs[f"pop_{name}_med"], obs[f"pop_{name}_hi"] = weighted_quantiles(s[:, :, j], w, (0.16, 0.5, 0.84))
-        agn = s[:, :, th.index("log_L5100_erg")] > 40.0
+        agn = EddingtonRatioPrior().log_lam(s[:, :, th.index("log_L5100_erg")], s[:, :, th.index("log_stellar_mass")]) > -2.0
         obs["p_agn_train"], obs["p_agn_pop"], obs["pop_ess"] = agn.mean(axis=1), (w * agn).sum(axis=1), ess
     if args.photoz:
         pz = pd.read_parquet(Path(args.photoz).expanduser())
@@ -170,7 +170,7 @@ def main(argv=None):
                 notx = ~obs["ref_is_xray_agn"].fillna(False).astype(bool).to_numpy()
                 for name, m in (("X-ray AGN", agn), ("X-ray AGN, variable", agn & (obs["all_varSigClip"].to_numpy(float) >= 5)),
                                 ("not X-ray AGN", notx)):
-                    print(f"    mean P(AGN): {name:22s} training prior {obs['p_agn_train'][m].mean():.2f}, population prior {obs['p_agn_pop'][m].mean():.2f}")
+                    print(f"    mean P(lambda_Edd > 0.01): {name:22s} training prior {obs['p_agn_train'][m].mean():.2f}, population prior {obs['p_agn_pop'][m].mean():.2f}")
 
     out = Path(args.out).expanduser()
     obs.to_parquet(out.with_suffix(".parquet"))
