@@ -211,7 +211,7 @@ coverage 0.67/0.94 vs 0.50/0.89. The variability model was still improving at ep
 all-object comparisons are not yet fair.
 
 Next: real survey library (RSP export); ~10^6 simulations and longer training; photo-z
-improvements (population priors by reweighting, see below in the conversation log);
+improvements (population priors applied by reweighting posterior samples, p_pop(θ)/p_train(θ), so they can change without retraining);
 validation on CDF-S.
 
 ## DIA-source calibration history (Oct 2026)
