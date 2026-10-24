@@ -197,9 +197,10 @@ The DRW step is what maps L_AGN to the variability DP2 can record: over a ~9-mon
 long-τ AGN shows only part of its asymptotic variance (tested against
 E[S²] = σ²(1 − Σρ_ij/n(n−1))), so without it the network would underestimate L_AGN.
 Missing data: every band's features carry a presence flag (`has_<b>`, `hasvar_<b>`), and the
-gaps of the borrowed library object are inherited; on top of that `--band-dropout` (default
-0.1) hides each band's coadd flux at random, so band combinations absent from the library
-(e.g. no r) are still seen in training. Extra inputs (WISE, X-ray, spec-z) need retraining.
+gaps of the borrowed library object are inherited (the library is matched on i band, present
+for ~99% of Objects, so e.g. the 54% of WFD Objects without an r coadd are represented); on
+top of that `--band-dropout` (default 0.05) removes one random band from that fraction of
+objects, so patterns absent from the library are still seen. Extra inputs (WISE, X-ray, spec-z) need retraining.
 Smoke test (mock DDF library, 4000 objects, 17 s incl. compile): variable fraction of AGN rises
 1% → 13% → 25% → 51% → 75% from λL5100 = 10^40–42 to 10^45–46 erg/s; 0 false positives
 without AGN. Survey library: `scripts/export_survey_library.py` (run on the RSP; DDF cones plus

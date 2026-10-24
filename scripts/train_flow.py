@@ -35,6 +35,8 @@ def main(argv=None):
     p.add_argument("--no-variability", action="store_true", help="photometry-only inputs (ablation)")
     p.add_argument("--nzm", help="empirical p(z|m) catalogue (fetch_cosmos2020_nzm.py output): resample the "
                    "training and held-out sets to it before training")
+    p.add_argument("--nzm-oversample", type=float, default=2.0,
+                   help="resampled set size in units of the effective sample size (capped at the input size)")
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args(argv)
     pd.set_option("display.width", 200)
@@ -47,8 +49,12 @@ def main(argv=None):
         from rubin_imbh.amortized.nz_prior import EmpiricalNzm, resample_to_nzm
 
         nzm = EmpiricalNzm.from_cosmos2020(args.nzm)
-        train_df, ess = resample_to_nzm(train_df, nzm, len(train_df), rng)
-        test_df, ess_t = resample_to_nzm(test_df, nzm, len(test_df), rng)
+        # drawing many more objects than the effective sample size only repeats the same
+        # simulations, which the flow then overfits
+        _, ess = resample_to_nzm(train_df, nzm, 1, rng)
+        _, ess_t = resample_to_nzm(test_df, nzm, 1, rng)
+        train_df, _ = resample_to_nzm(train_df, nzm, int(min(len(train_df), args.nzm_oversample * ess)), rng)
+        test_df, _ = resample_to_nzm(test_df, nzm, int(min(len(test_df), args.nzm_oversample * ess_t)), rng)
         print(f"resampled to empirical p(z|m): effective sample size {ess:.0f} (training), {ess_t:.0f} (held-out)")
     print(f"{len(train_df)} training, {len(test_df)} held-out simulations")
 

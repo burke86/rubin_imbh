@@ -64,8 +64,12 @@ class EmpiricalNzm:
 
 
 def observed_r_mag(df: pd.DataFrame) -> np.ndarray:
+    """r magnitude for the p(z | m) weights: the noise-free ``true_r`` of simulations (the
+    prior is on intrinsic properties, and the observed r is missing for band-dropout and
+    no-coverage objects; NaN would fall in the faintest bin), else the observed ``coadd_r``."""
+    col = "true_r" if "true_r" in df else "coadd_r"
     with np.errstate(divide="ignore", invalid="ignore"):
-        return 31.4 - 2.5 * np.log10(np.clip(df["coadd_r"].to_numpy(float), 1e-3, None))
+        return 31.4 - 2.5 * np.log10(np.clip(df[col].to_numpy(float), 1e-3, None))
 
 
 def nzm_weights(df: pd.DataFrame, target: EmpiricalNzm, max_weight: float = 1.0e4) -> np.ndarray:

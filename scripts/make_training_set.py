@@ -35,8 +35,10 @@ def main(argv=None):
     p.add_argument("--dsps-ssp", required=True, help="DSPS SSP template file")
     p.add_argument("--chunk", type=int, default=20000, help="objects simulated per chunk (bounds memory)")
     p.add_argument("--batch-size", type=int, default=4096)
-    p.add_argument("--band-dropout", type=float, default=0.1,
-                   help="probability of hiding each band's coadd flux, so the model handles missing bands")
+    p.add_argument("--band-dropout", type=float, default=0.05,
+                   help="fraction of objects that lose one random band's coadd flux, so the model handles missing bands")
+    p.add_argument("--zp-sigma", type=float, default=ObserveConfig.zp_sigma,
+                   help="per-object, per-band calibration offset rms applied to the coadd fluxes")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", required=True)
     args = p.parse_args(argv)
@@ -55,7 +57,7 @@ def main(argv=None):
     for k, start in enumerate(range(0, args.n, args.chunk)):
         m = min(args.chunk, args.n - start)
         sim = simulate_population(m, priors, rng, cfg, seed=args.seed * 1000 + k, batch_size=args.batch_size)
-        parts.append(observe(sim, lib, priors, rng, ObserveConfig(layer=args.layer, band_dropout=args.band_dropout)))
+        parts.append(observe(sim, lib, priors, rng, ObserveConfig(layer=args.layer, band_dropout=args.band_dropout, zp_sigma=args.zp_sigma)))
         logging.info("%d / %d objects (%.0f s)", start + m, args.n, time.time() - t0)
     out = pd.concat(parts, ignore_index=True)
     out.to_parquet(Path(args.out).expanduser())

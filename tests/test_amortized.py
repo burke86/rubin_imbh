@@ -171,15 +171,15 @@ def test_bright_null_is_standard_with_injected_floor_scatter():
     assert np.median(flat) < -1.0  # without the scatter the floor makes bright objects look too constant
 
 
-def test_band_dropout_hides_coadd_bands_independently():
+def test_band_dropout_hides_one_band_per_object():
     from rubin_imbh.amortized.npe import build_features
 
     rng = np.random.default_rng(9)
     lib = mock_library(2000, rng, "ddf")
-    out = observe(_sim(4000, rng, 0.0), lib, Priors(), rng, ObserveConfig(layer="ddf", band_dropout=0.2))
+    out = observe(_sim(6000, rng, 0.0), lib, Priors(), rng, ObserveConfig(layer="ddf", band_dropout=0.3))
     missing = np.column_stack([out[f"coadd_{b}"].isna() for b in BANDS])
-    assert np.allclose(missing.mean(axis=0), 0.2, atol=0.03)
-    assert abs(np.mean(missing[:, 2] & missing[:, 3]) - 0.04) < 0.015  # independent across bands
+    assert abs(missing.any(axis=1).mean() - 0.3) < 0.03 and missing.sum(axis=1).max() == 1
+    assert np.allclose(missing.mean(axis=0), 0.05, atol=0.015)
     x, names = build_features(out)
     assert np.isfinite(x).all() and np.allclose(x[:, names.index("has_r")], ~missing[:, 2])
 
