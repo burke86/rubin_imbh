@@ -29,6 +29,8 @@ CC-IN2P3), so the pipeline runs there; it is tested locally on mock catalogs.
 - `scripts/inspect_lightcurves.py` — light curves of sampled selected objects per tile, and which nights their excursions share
 - `scripts/gaia_flag.py` — Gaia DR3 crossmatch (remote HATS): flags stars (parallax/PM > 5σ), quasar candidates, Gaia variables
 - `amortized/simulator_proto.py` — jaxsedfit as a batched host+AGN LSST photometry simulator (feasibility)
+- `scripts/export_survey_library.py` — DP2 noise/cadence library for the simulator (RSP)
+- `scripts/make_training_set.py` — amortized-inference training set (priors → jaxsedfit → DP2 observables)
 - `scripts/depth_map.py` — coadd 5σ depth per HEALPix pixel from object_collection; finds DP2's depth layers
 - `scripts/simulate_clip_null.py` — regenerates the null table for `varSigClip`
 - `tests/test_pipeline.py` — mock-data tests (`python tests/test_pipeline.py`)
@@ -175,10 +177,24 @@ parameters, component fluxes incl. `variable_agn_fluxes`), plus a fix for a trac
 the cached jax_cosmo distance table that broke repeated jit traces. Planned later PR:
 per-filter variability amplitude as an optional observable (≈ f_var × `variable_agn_fluxes`).
 
-Next: population priors (redshift, mass function, SFH, dust, AGN luminosity/fraction); AGN
-variability model (amplitude vs luminosity and wavelength, sampled at real DP2 cadences and
-reduced with the pipeline's statistic); empirical DP2 noise/cadence library (RSP export);
-flow training (flowjax/optax); validation on CDF-S.
+Training-set generator (`rubin_imbh/amortized/`, `scripts/make_training_set.py`):
+population priors (z 0.02–3, log M* 6.5–12, half-normal E(B−V), 50% AGN with λL5100
+10^40–10^46 erg/s; SFH age bounded by the age of the universe through jaxsedfit's redshift-
+dependent prior) → `jaxsedfit.simulate` (LSST ugrizy total and `variable_agn_fluxes`) →
+r < 25.5 → `observe()`: coadd noise, cadence and nightly errors borrowed from a brightness-
+matched library object; one DRW shared by all bands with rms = f_var(λ_rest) × variable AGN
+flux (f_var is the asymptotic SF∞/√2 amplitude, median 0.15 at 5100 Å, 0.4 dex; τ_rest median
+200 d, 0.3 dex), sampled at the real nights; reduced with the pipeline's `lightcurve_stats`.
+The DRW step is what maps L_AGN to the variability DP2 can record: over a ~9-month baseline a
+long-τ AGN shows only part of its asymptotic variance (tested against
+E[S²] = σ²(1 − Σρ_ij/n(n−1))), so without it the network would underestimate L_AGN.
+Smoke test (mock DDF library, 4000 objects, 17 s incl. compile): variable fraction of AGN rises
+1% → 13% → 25% → 51% → 75% from λL5100 = 10^40–42 to 10^45–46 erg/s; 0 false positives
+without AGN. Survey library: `scripts/export_survey_library.py` (run on the RSP; DDF cones plus
+WFD cones at several ecliptic latitudes).
+
+Next: run the library export on the RSP; flow training (flowjax/optax) on the training set;
+calibration on held-out simulations; validation on CDF-S.
 
 ## DIA-source calibration history (Oct 2026)
 
