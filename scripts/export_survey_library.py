@@ -12,6 +12,9 @@ depth_map.py parquet), WFD cones are centred on sky pixels of typical WFD depth 
 25th and 75th percentile of i-band m5), spread over ecliptic latitude; otherwise a fixed list
 is used. Regions without coverage are skipped. Override everything with
 --region NAME LAYER RA DEC (repeatable).
+
+--strip-ids drops objectId and coordinates (the generator needs neither) and shuffles rows,
+for a library that is to leave the RSP (see DATA_POLICY.md).
 """
 
 from __future__ import annotations
@@ -140,6 +143,8 @@ def main(argv=None):
     p.add_argument("--flux-template", default="{b}_cModelFlux",
                    help="coadd flux column (error = <name>Err); must match what validate_real.py feeds the model")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--strip-ids", action="store_true",
+                   help="drop objectId and coordinates and shuffle rows (for copies leaving the RSP; DATA_POLICY.md)")
     p.add_argument("--out", required=True)
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -153,6 +158,9 @@ def main(argv=None):
     rng = np.random.default_rng(args.seed)
     parts = [region_rows(args.catalog, *r, args.radius, args.per_region, rng, args.flux_template) for r in regions]
     lib = pd.concat([x for x in parts if len(x)], ignore_index=True)
+    if args.strip_ids:
+        lib = lib.drop(columns=["objectId", "coord_ra", "coord_dec"])
+        lib = lib.iloc[rng.permutation(len(lib))].reset_index(drop=True)
     lib.to_parquet(Path(args.out).expanduser())
     print(f"wrote {len(lib)} library rows ({lib.groupby('layer').size().to_dict()}) to {args.out}")
 

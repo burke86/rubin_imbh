@@ -2,8 +2,9 @@
 
 Library format (one row per real Object; written by ``scripts/export_survey_library.py``):
 
-  objectId, layer (e.g. "wfd", "ddf"), refExtendedness
-  {b}_coadd_flux, {b}_coadd_err      coadd PSF flux and error, nJy, for b in ugrizy
+  objectId, coord_ra, coord_dec      (absent with export --strip-ids; not used here)
+  region, layer (e.g. "wfd", "ddf"), refExtendedness
+  {b}_coadd_flux, {b}_coadd_err      coadd flux (cModel by default) and error, nJy
   {b}_night_mjd, {b}_night_err       lists: nightly epochs (mean MJD) and nightly-mean
                                      difference-flux errors (nJy), after flag cuts
 

@@ -13,6 +13,11 @@ Two sources of difference-image forced light curves (`--source`):
 The DP2 HATS catalogs live only at data-rights sites (RSP `/rubin/lsdb_data`, NERSC,
 CC-IN2P3), so the pipeline runs there; it is tested locally on mock catalogs.
 
+**Data policy:** DP2 tables and anything that can recreate them (stats, selections, the survey
+library, photo-z exports) are proprietary: they never go in this repo or to non-data-rights
+holders. See [DATA_POLICY.md](DATA_POLICY.md) for the relevant Rubin rules and how they map onto
+this project's files.
+
 ## Layout
 
 - `rubin_imbh/varstats.py` — per-object, per-band statistics (pure pandas, vectorized)
@@ -194,7 +199,8 @@ E[S²] = σ²(1 − Σρ_ij/n(n−1))), so without it the network would underest
 Smoke test (mock DDF library, 4000 objects, 17 s incl. compile): variable fraction of AGN rises
 1% → 13% → 25% → 51% → 75% from λL5100 = 10^40–42 to 10^45–46 erg/s; 0 false positives
 without AGN. Survey library: `scripts/export_survey_library.py` (run on the RSP; DDF cones plus
-WFD cones at several ecliptic latitudes).
+WFD cones at several ecliptic latitudes); add `--strip-ids` (drops objectId and coordinates,
+shuffles rows) for a copy that leaves the RSP ([DATA_POLICY.md](DATA_POLICY.md)).
 
 Neural posterior estimator (`rubin_imbh/amortized/npe.py`, `scripts/train_flow.py`; flowjax
 19 + equinox 0.13 installed in the jaxcpu env with jax pinned at 0.6.2): masked autoregressive
