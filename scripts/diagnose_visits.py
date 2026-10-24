@@ -23,7 +23,7 @@ from upath import UPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rubin_imbh.pipeline import needed_columns, resolve_columns  # noqa: E402
-from rubin_imbh.varstats import DIA, OBJECT  # noqa: E402
+from jaxpz.lightcurve import DIA, OBJECT  # noqa: E402
 from rubin_imbh.visits import (  # noqa: E402
     add_residuals,
     apply_visit_offsets,

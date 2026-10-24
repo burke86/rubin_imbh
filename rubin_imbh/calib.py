@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .varstats import clip_chi2_to_sigma
+from jaxpz.lightcurve import clip_chi2_to_sigma
 
 
 def calibration_groups(d: pd.DataFrame) -> tuple[pd.Series, str, str | None]:

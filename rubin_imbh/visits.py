@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .varstats import Columns, Cuts, good_epoch_mask, lightcurve_stats
+from jaxpz.lightcurve import Columns, Cuts, good_epoch_mask, lightcurve_stats
 
 AB_ZP_NJY = 31.4  # m_AB = 31.4 - 2.5 log10(f / nJy)
 

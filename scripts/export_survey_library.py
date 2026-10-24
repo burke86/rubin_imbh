@@ -31,7 +31,7 @@ from upath import UPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rubin_imbh.pipeline import resolve_columns  # noqa: E402
-from rubin_imbh.varstats import OBJECT, night_index  # noqa: E402
+from jaxpz.lightcurve import OBJECT, night_index  # noqa: E402
 
 BANDS = "ugrizy"
 DEFAULT_REGIONS = [

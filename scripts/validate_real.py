@@ -28,8 +28,8 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from rubin_imbh.amortized.real import real_observables  # noqa: E402
-from rubin_imbh.amortized.references import (  # noqa: E402
+from jaxpz.observables import real_observables  # noqa: E402
+from rubin_imbh.references import (  # noqa: E402
     cdfs_xray_reference, cosmos2020_reference, match_reference, milliquas_reference)
 
 MAG_BINS = [-np.inf, 21, 22, 23, 24, 25.5]
@@ -59,13 +59,16 @@ def main(argv=None):
     p.add_argument("--match-arcsec", type=float, default=1.0)
     p.add_argument("--n-samples", type=int, default=100)
     p.add_argument("--extended-only", action="store_true")
+    p.add_argument("--condition-on-specz", action="store_true",
+                   help="give the model each object's spectroscopic reference redshift (z_type == spec) as a known "
+                        "redshift; needs a model trained with jaxpz train --specz-input")
     p.add_argument("--keep-stars", action="store_true",
                    help="keep Gaia stars (gaia_star, from scripts/gaia_flag.py) and reference stars; dropped by default")
     p.add_argument("--out", required=True, help="output prefix (.parquet with posteriors, .csv with metrics)")
     args = p.parse_args(argv)
     pd.set_option("display.width", 200)
 
-    from rubin_imbh.amortized.npe import NPE, summarize_posteriors
+    from jaxpz.npe import NPE, summarize_posteriors
 
     stats = pd.read_parquet(Path(args.stats).expanduser())
     if "envClean" in stats:
@@ -95,7 +98,14 @@ def main(argv=None):
     if len(obs) == 0:
         raise SystemExit("no matches")
 
-    obs = summarize_posteriors(NPE.load(args.npe), obs, args.n_samples)
+    npe = NPE.load(args.npe)
+    if args.condition_on_specz:
+        if not npe.spec.specz_input:
+            raise SystemExit("--condition-on-specz needs a model trained with jaxpz train --specz-input")
+        spec = obs["ref_z_type"].astype(str).eq("spec").to_numpy() if "ref_z_type" in obs else np.zeros(len(obs), bool)
+        obs["z_spec"] = np.where(spec, obs["ref_z_ref"].to_numpy(float), np.nan)
+        print(f"conditioning on the spectroscopic redshift of {spec.sum()} of {len(obs)} objects")
+    obs = summarize_posteriors(npe, obs, args.n_samples)
     if args.photoz:
         pz = pd.read_parquet(Path(args.photoz).expanduser())
         pz_cols = (args.photoz_column.split(",") if args.photoz_column

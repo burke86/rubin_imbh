@@ -9,7 +9,7 @@ from dataclasses import replace
 import numpy as np
 import pandas as pd
 
-from .varstats import BANDS, Columns, Cuts, lightcurve_stats, summarize
+from jaxpz.lightcurve import BANDS, Columns, Cuts, lightcurve_stats, summarize
 
 log = logging.getLogger(__name__)
 

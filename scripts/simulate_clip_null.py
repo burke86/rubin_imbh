@@ -1,4 +1,4 @@
-"""Regenerate the null-distribution table for the leave-one-out statistic in varstats.py.
+"""Regenerate the null-distribution table for the leave-one-out statistic in jaxpz.lightcurve.
 
 For n Gaussian epochs, drop the one with the largest residual about the weighted mean,
 recompute chi^2, and record the mean and sd of (chi^2 / (n - 2))^(1/3).

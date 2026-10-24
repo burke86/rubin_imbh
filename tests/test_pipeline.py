@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from rubin_imbh.varstats import Columns, Cuts, chi2_to_sigma, lightcurve_stats, summarize  # noqa: E402
+from jaxpz.lightcurve import Columns, Cuts, chi2_to_sigma, lightcurve_stats, summarize  # noqa: E402
 
 COLS = Columns()
 
@@ -75,7 +75,7 @@ def write_hats(nf, path, rows):
 
 
 def test_clip_null_is_standard_normal():
-    from rubin_imbh.varstats import clip_chi2_to_sigma
+    from jaxpz.lightcurve import clip_chi2_to_sigma
 
     rng = np.random.default_rng(5)
     for n in (8, 40, 120, 800):  # 800 exercises the large-n extrapolation
@@ -318,7 +318,7 @@ def test_object_source_end_to_end():
     import lsdb
 
     from rubin_imbh.pipeline import needed_columns, select_variables
-    from rubin_imbh.varstats import OBJECT
+    from jaxpz.lightcurve import OBJECT
 
     nf, base = mock_objects()
     with tempfile.TemporaryDirectory() as tmp:
@@ -372,7 +372,7 @@ def sparse_mock(n_obj, lo, hi, var_frac=0.0, amp=0.3, seed=0):
 
 
 def test_combined_statistic_null_and_power():
-    from rubin_imbh.varstats import combo_clip_sigma
+    from jaxpz.lightcurve import combo_clip_sigma
 
     cuts = Cuts(min_epochs=10)
     # WFD-like: 1-6 epochs per band

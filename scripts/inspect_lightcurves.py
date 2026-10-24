@@ -25,7 +25,7 @@ import pandas as pd
 from upath import UPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from rubin_imbh.varstats import night_index  # noqa: E402
+from jaxpz.lightcurve import night_index  # noqa: E402
 
 BANDS = "griz"
 FIELDS = ["band", "psfDiffFlux", "psfDiffFluxErr", "psfFlux", "midpointMjdTai", "psfDiffFlux_flag",

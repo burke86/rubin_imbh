@@ -40,7 +40,7 @@ from upath import UPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rubin_imbh.pipeline import needed_columns, nested_fields, select_variables, tile_pixels  # noqa: E402
-from rubin_imbh.varstats import DIA, OBJECT, Cuts  # noqa: E402
+from jaxpz.lightcurve import DIA, OBJECT, Cuts  # noqa: E402
 
 DEFAULT_CATALOG = {
     "object": "/rubin/lsdb_data/dp2/object_collection",

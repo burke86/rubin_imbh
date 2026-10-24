@@ -25,7 +25,7 @@ from upath import UPath
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rubin_imbh.objects import airmass, match_environment, tail_stats  # noqa: E402
 from rubin_imbh.pipeline import needed_columns, resolve_columns  # noqa: E402
-from rubin_imbh.varstats import Columns  # noqa: E402
+from jaxpz.lightcurve import Columns  # noqa: E402
 from rubin_imbh.visits import AB_ZP_NJY, flatten, mag_to_njy, stats_from_flat  # noqa: E402
 
 BANDS = "griz"

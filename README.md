@@ -20,7 +20,11 @@ this project's files.
 
 ## Layout
 
-- `rubin_imbh/varstats.py` — per-object, per-band statistics (pure pandas, vectorized)
+The light-curve statistics and the amortized inference (training sets, posterior estimator,
+priors) live in [jaxpz](https://github.com/burke86/jaxpz) (`jaxpz.lightcurve`, `jaxpz.npe`,
+`jaxpz simulate|train|predict|redraw|fetch-nzm`); install it alongside this repo
+(`pip install -e ../jaxpz`, or on the RSP `pip install --user git+https://github.com/burke86/jaxpz`).
+
 - `rubin_imbh/pipeline.py` — LSDB wrapper: schema check, coarse cut, `map_partitions`
 - `scripts/select_variables.py` — CLI (`inspect`, `tiles`, `run`; `--source object|dia`)
 - `rubin_imbh/environment.py` — Object matching (dia source) and bright-star veto
@@ -35,13 +39,11 @@ this project's files.
 - `scripts/gaia_flag.py` — Gaia DR3 crossmatch (remote HATS): flags stars (parallax/PM > 5σ), quasar candidates, Gaia variables
 - `amortized/simulator_proto.py` — jaxsedfit as a batched host+AGN LSST photometry simulator (feasibility)
 - `scripts/export_survey_library.py` — DP2 noise/cadence library for the simulator (RSP)
-- `scripts/make_training_set.py` — amortized-inference training set (priors → jaxsedfit → DP2 observables)
-- `scripts/train_flow.py` — train/evaluate the neural posterior estimator (`rubin_imbh/amortized/npe.py`)
-- `scripts/fetch_cosmos2020_nzm.py` — COSMOS2020 photo-z vs r for the empirical p(z|m) prior (`rubin_imbh/amortized/nz_prior.py`)
-- `scripts/validate_real.py` — posteriors for real DP2 objects vs COSMOS2020 / CDF-S X-ray references and DP2 photo-z
+- `scripts/attach_object_columns.py` — attach cModel (or any Object) columns to a selection by objectId (RSP)
+- `scripts/validate_real.py` — jaxpz posteriors for real DP2 objects vs COSMOS2020 / CDF-S X-ray / Milliquas references (`rubin_imbh/references.py`) and DP2 photo-z; `--condition-on-specz`
 - `scripts/depth_map.py` — coadd 5σ depth per HEALPix pixel from object_collection; finds DP2's depth layers
 - `scripts/simulate_clip_null.py` — regenerates the null table for `varSigClip`
-- `tests/test_pipeline.py` — mock-data tests (`python tests/test_pipeline.py`)
+- `tests/` — mock-data tests (`python -m pytest`; needs lsdb and jaxpz)
 
 ## Statistics (per band, on good forced-photometry epochs)
 
@@ -161,6 +163,11 @@ Next:
    for host photometry.
 
 ## Amortized joint inference (started Oct 2026)
+
+(The code below now lives in [jaxpz](https://github.com/burke86/jaxpz): `rubin_imbh/amortized/*`
+→ `jaxpz.*`, `make_training_set.py` → `jaxpz simulate`, `train_flow.py` → `jaxpz train`,
+`redraw_coadds.py` → `jaxpz redraw`, `infer.py` → `jaxpz predict`, `fetch_cosmos2020_nzm.py`
+→ `jaxpz fetch-nzm`.)
 
 Goal: posteriors for redshift, stellar mass, SFH, dust and AGN luminosity per object from
 coadd photometry plus the host-free variability amplitude, via a neural posterior estimator
@@ -495,6 +502,7 @@ largest server size and the recommended image, then File → New → Terminal.
 ```bash
 git clone https://github.com/burke86/rubin_imbh ~/rubin_imbh
 cd ~/rubin_imbh
+pip install --user git+https://github.com/burke86/jaxpz   # light-curve statistics (numpy/pandas only)
 ```
 
 **3. Check the environment.** The default catalogs are the explicit DP2 paths
