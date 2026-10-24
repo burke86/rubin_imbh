@@ -167,6 +167,14 @@ population priors: log-uniform E(B−V) up to ~10 mag gives near-zero fluxes, SF
 bounded by the age of the universe, and the default AGN-luminosity prior is seeded from the
 observed photometry, so the simulator needs its own population priors.
 
+Code split: survey-agnostic SED pieces go to jaxsedfit as PRs; LSST/DP2 specifics stay
+here. jaxsedfit PR #121 (draft, branch `agent/simulate-api`, worktree
+`../jaxsedfit-simulate-pr`): public `jaxsedfit.simulate` / `simulation_config` /
+`SimulationResult` / `make_simulator` (batched simulation with fixed and prior-drawn
+parameters, component fluxes incl. `variable_agn_fluxes`), plus a fix for a tracer leak in
+the cached jax_cosmo distance table that broke repeated jit traces. Planned later PR:
+per-filter variability amplitude as an optional observable (≈ f_var × `variable_agn_fluxes`).
+
 Next: population priors (redshift, mass function, SFH, dust, AGN luminosity/fraction); AGN
 variability model (amplitude vs luminosity and wavelength, sampled at real DP2 cadences and
 reduced with the pipeline's statistic); empirical DP2 noise/cadence library (RSP export);
