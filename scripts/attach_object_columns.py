@@ -58,8 +58,10 @@ def main(argv=None):
     x = x[same].drop_duplicates("objectId")
     out = d.merge(x[["objectId", *cols]], on="objectId", how="left")
     out.to_parquet(Path(args.out).expanduser())
-    found = out[cols[0]].notna()
-    print(f"{len(out)} selected objects; {int(found.sum())} ({found.mean():.3f}) with {cols[0]} attached; wrote {args.out}")
+    found = out["objectId"].isin(x["objectId"])
+    filled = ", ".join(f"{c} {out[c].notna().mean():.2f}" for c in cols)
+    print(f"{len(out)} selected objects; {int(found.sum())} ({found.mean():.3f}) matched by objectId; wrote {args.out}")
+    print(f"non-null fraction per column (missing coadds are NaN): {filled}")
 
 
 if __name__ == "__main__":
