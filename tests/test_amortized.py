@@ -56,7 +56,7 @@ def test_observe_null_without_agn_and_recovers_injected_rms():
     rng = np.random.default_rng(2)
     lib = mock_library(3000, rng, "ddf")
     pri = Priors()
-    cfg = ObserveConfig(layer="ddf", sys_frac={})  # no floor: pure measurement noise
+    cfg = ObserveConfig(layer="ddf", sys_frac={}, zp_sigma=0.0)  # pure measurement noise
     null = observe(_sim(1500, rng, 0.0), lib, pri, rng, cfg)
     z = null["r_varSigClip"].dropna()
     assert len(z) > 1000 and abs(z.mean()) < 0.15 and abs(z.std() - 1) < 0.15
@@ -65,7 +65,7 @@ def test_observe_null_without_agn_and_recovers_injected_rms():
     pull = (null["coadd_r"] - null["true_r"]) / null["coadd_err_r"]
     assert abs(pull.std() - 1) < 0.08
 
-    strong = observe(_sim(1500, rng, 3.0e4), lib, pri, rng, cfg)  # large variable AGN flux
+    strong = observe(_sim(4000, rng, 3.0e4), lib, pri, rng, cfg)  # large variable AGN flux
     # A DRW observed over a baseline shorter than tau shows less than its asymptotic variance:
     # E[S^2] = sigma^2 (1 - sum_{i != j} rho_ij / (n (n - 1))), rho_ij = exp(-|t_i - t_j| / tau_obs)
     tau_obs = strong["tau_rest_days"].to_numpy() * (1 + strong["redshift"].to_numpy())
@@ -76,11 +76,12 @@ def test_observe_null_without_agn_and_recovers_injected_rms():
         rho = np.exp(-np.abs(t[:, None] - t[None, :]) / tau)
         expected[i] = strong["true_rms_r"].iat[i] ** 2 * (1 - (rho.sum() - n) / (n * (n - 1)))
     rec = strong["r_xsAbs"].to_numpy()
-    ok = np.isfinite(rec) & (strong["r_nEpoch"] >= 20)
-    # E[S^2] is a statement about the mean (the DRW sample variance is right-skewed, so its
-    # median sits below the mean)
-    ratio = rec[ok].sum() / expected[ok].sum()
-    assert 0.9 < ratio < 1.1, ratio  # excess variance tracks the sampling-expected variance
+    ok = np.isfinite(rec) & (strong["r_nEpoch"] >= 20) & (expected > 0)
+    # E[S^2] is about the mean (DRW sample variances are right-skewed, so medians sit low); the
+    # mean of per-object ratios is stable (0.99-1.01 over seeds), unlike the ratio of sums,
+    # which the largest-amplitude objects dominate
+    ratio = float(np.mean(rec[ok] / expected[ok]))
+    assert 0.95 < ratio < 1.05, ratio  # excess variance tracks the sampling-expected variance
     assert (strong["r_varSigClip"] > 5).mean() > 0.8
     for c in ("fvar0", "fvar_alpha", "tau_rest_days", "lib_index", "all_dof"):
         assert c in strong
@@ -136,6 +137,17 @@ def test_empirical_nzm_resampling_matches_target():
         want = np.median(z_t[(m_t > lo) & (m_t < hi)])
         got = np.median(out.redshift[(mo > lo) & (mo < hi)])
         assert abs(got - want) < 0.05 + 0.05 * want, (lo, got, want)
+
+
+def test_observe_zero_point_offsets_add_fractional_scatter():
+    rng = np.random.default_rng(8)
+    lib = mock_library(3000, rng, "ddf")
+    sim = _sim(4000, rng, 0.0)
+    out = observe(sim, lib, Priors(), rng, ObserveConfig(layer="ddf", sys_frac={}, zp_sigma=0.03))
+    frac = (out["coadd_r"] - out["true_r"]) / out["true_r"]
+    noise = out["coadd_err_r"] / out["true_r"]
+    bright = (31.4 - 2.5 * np.log10(out["true_r"])) < 20.5  # measurement noise << 3%
+    assert abs(np.std(frac[bright]) - np.sqrt(0.03**2 + np.median(noise[bright]) ** 2)) < 0.005
 
 
 if __name__ == "__main__":

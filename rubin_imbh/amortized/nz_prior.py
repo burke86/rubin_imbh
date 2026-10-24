@@ -25,7 +25,7 @@ class EmpiricalNzm:
 
     @classmethod
     def from_catalog(cls, z: np.ndarray, m: np.ndarray, *, m_range=(16.0, 26.0), dm: float = 0.25,
-                     z_range=(0.0, 3.0), dz: float = 0.02, z_smooth: float = 0.04, min_per_bin: int = 200):
+                     z_range=(0.0, 4.0), dz: float = 0.02, z_smooth: float = 0.04, min_per_bin: int = 200):
         """Histogram p(z | m); magnitude bins with few objects are merged with their neighbours."""
         ok = np.isfinite(z) & np.isfinite(m) & (z >= z_range[0]) & (z < z_range[1]) & (m >= m_range[0]) & (m < m_range[1])
         z, m = z[ok], m[ok]

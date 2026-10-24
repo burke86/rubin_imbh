@@ -35,7 +35,7 @@ W_TO_ERG_S = 1.0e7
 class Priors:
     """Population priors for the training set (all ranges inclusive)."""
 
-    z_range: tuple[float, float] = (0.02, 3.0)
+    z_range: tuple[float, float] = (0.02, 4.0)  # ~5% of r < 25.5 galaxies lie at z > 3 (COSMOS2020)
     log_mass_range: tuple[float, float] = (6.5, 12.0)
     ebv_gal_sigma: float = 0.3          # half-normal
     ebv_agn_sigma: float = 0.5          # half-normal
@@ -77,7 +77,7 @@ class Priors:
         }
 
 
-def lsst_simulation_config(dsps_ssp_fn: str, z_range=(0.02, 3.0), n_redshift_grid: int = 512):
+def lsst_simulation_config(dsps_ssp_fn: str, z_range=(0.02, 4.0), n_redshift_grid: int = 640):
     """jaxsedfit simulation config for LSST ugrizy with a sampled redshift over ``z_range``."""
     import jaxsedfit
     from jaxsedfit.benchmark import _build_chimera_agn_config  # AGN line / Fe II templates
@@ -125,6 +125,9 @@ class ObserveConfig:
     err_scale: float = 1.0
     var_bands: tuple[str, ...] = tuple("griz")  # bands whose variability summaries are kept
     match_k: int = 25
+    # per-object, per-band multiplicative zero-point / calibration offsets (rms), so the network
+    # does not over-trust colours; applied to the coadd fluxes
+    zp_sigma: float = 0.01
 
 
 def observe(sim: pd.DataFrame, library: pd.DataFrame, priors: Priors, rng: np.random.Generator,
@@ -142,10 +145,11 @@ def observe(sim: pd.DataFrame, library: pd.DataFrame, priors: Priors, rng: np.ra
     out["lib_index"] = idx
     lib = library.iloc[idx].reset_index(drop=True)
 
-    # coadd photometry
+    # coadd photometry, with calibration offsets
     for b in BANDS:
         err = lib[f"{b}_coadd_err"].to_numpy(float)
-        out[f"coadd_{b}"] = out[f"true_{b}"].to_numpy() + rng.normal(0.0, err)
+        zp = 1.0 + cfg.zp_sigma * rng.standard_normal(n)
+        out[f"coadd_{b}"] = out[f"true_{b}"].to_numpy() * zp + rng.normal(0.0, err)
         out[f"coadd_err_{b}"] = err
 
     # variability: shared unit DRW at the union of each object's nights, scaled per band
