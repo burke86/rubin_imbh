@@ -128,6 +128,10 @@ class ObserveConfig:
     # per-object, per-band multiplicative zero-point / calibration offsets (rms), so the network
     # does not over-trust colours; applied to the coadd fluxes
     zp_sigma: float = 0.01
+    # probability of hiding each band's coadd flux (independently per object and band, on top of
+    # the gaps borrowed from the library), so the network handles arbitrary missing bands; the
+    # band's variability summaries are kept
+    band_dropout: float = 0.0
 
 
 def observe(sim: pd.DataFrame, library: pd.DataFrame, priors: Priors, rng: np.random.Generator,
@@ -209,4 +213,8 @@ def observe(sim: pd.DataFrame, library: pd.DataFrame, priors: Priors, rng: np.ra
     out["all_varSigClip"] = st["all_varSigClip"].to_numpy()
     out["all_dof"] = st["all_dof"].to_numpy()
     out["true_rms_r"] = rms[:, BANDS.index("r")]
+    if cfg.band_dropout > 0:
+        for b in BANDS:
+            drop = rng.random(n) < cfg.band_dropout
+            out.loc[drop, [f"coadd_{b}", f"coadd_err_{b}"]] = np.nan
     return out

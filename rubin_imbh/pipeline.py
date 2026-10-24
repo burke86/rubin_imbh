@@ -137,6 +137,12 @@ def add_variability(nf, cols: Columns, cuts: Cuts, select: bool = True, bands=BA
     return out
 
 
+def _apply_prefilter(df, expr: str):
+    """Rows where ``expr`` is true; a null comparison (e.g. a missing refExtendedness) counts as false."""
+    mask = pd.Series(df.eval(expr)).astype("boolean").fillna(False).to_numpy(dtype=bool)
+    return df.iloc[np.flatnonzero(mask)]
+
+
 def select_variables(
     catalog, cols: Columns = Columns(), cuts: Cuts = Cuts(), select: bool = True, tile=None,
     prefilter: str | None = None, chunk_objects: int = CHUNK_OBJECTS,
@@ -153,7 +159,9 @@ def select_variables(
         catalog = catalog.pixel_search([tuple(tile)])
     coarse = catalog
     if prefilter:
-        coarse = coarse.query(prefilter)
+        # an explicit mask instead of catalog.query: same result, and it avoids nested-pandas'
+        # label-based .loc, which failed on a DP2 COSMOS partition
+        coarse = coarse.map_partitions(_apply_prefilter, expr=prefilter, meta=coarse.meta if hasattr(coarse, "meta") else coarse._ddf._meta)
     if cols.n_dia_sources is not None:
         coarse = coarse.query(f"{cols.n_dia_sources} >= {cuts.min_dia_sources}")
     kw = dict(cols=cols, cuts=cuts, select=select, tile=tile, chunk_objects=chunk_objects)

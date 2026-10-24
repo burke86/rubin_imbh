@@ -150,6 +150,19 @@ def test_observe_zero_point_offsets_add_fractional_scatter():
     assert abs(np.std(frac[bright]) - np.sqrt(0.03**2 + np.median(noise[bright]) ** 2)) < 0.005
 
 
+def test_band_dropout_hides_coadd_bands_independently():
+    from rubin_imbh.amortized.npe import build_features
+
+    rng = np.random.default_rng(9)
+    lib = mock_library(2000, rng, "ddf")
+    out = observe(_sim(4000, rng, 0.0), lib, Priors(), rng, ObserveConfig(layer="ddf", band_dropout=0.2))
+    missing = np.column_stack([out[f"coadd_{b}"].isna() for b in BANDS])
+    assert np.allclose(missing.mean(axis=0), 0.2, atol=0.03)
+    assert abs(np.mean(missing[:, 2] & missing[:, 3]) - 0.04) < 0.015  # independent across bands
+    x, names = build_features(out)
+    assert np.isfinite(x).all() and np.allclose(x[:, names.index("has_r")], ~missing[:, 2])
+
+
 def test_real_observables_match_training_features_and_reference_matching():
     from rubin_imbh.amortized.npe import build_features
     from rubin_imbh.amortized.real import real_observables

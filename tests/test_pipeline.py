@@ -291,7 +291,8 @@ def test_environment_match_and_bright_star_flag():
 def mock_objects(n_const=400, n_var=30, seed=12):
     """object_collection-like mock: objectId, coord_ra/dec, coadd columns, nested objectForcedSource.
 
-    Object 0 is an r~16 point source (a bright star); objects 1-3 sit 5" from it.
+    Object 0 is an r~16 point source (a bright star); objects 1-3 sit 5" from it. Every
+    7th object from 10 on has a null refExtendedness.
     """
     import nested_pandas as npd
 
@@ -304,6 +305,7 @@ def mock_objects(n_const=400, n_var=30, seed=12):
         "r_psfFlux": rng.uniform(1e3, 3e4, len(base)), "truth_var": base.truth_var.to_numpy(),
     })
     obj.loc[0, ["refExtendedness", "r_psfFlux", "truth_var"]] = [0.0, 1.5e6, False]
+    obj.loc[10::7, "refExtendedness"] = np.nan  # DP2 has Objects without an extendedness
     for k in (1, 2, 3):
         obj.loc[k, "coord_ra"] = obj.coord_ra[0] + 5.0 / 3600 / np.cos(np.deg2rad(obj.coord_dec[0]))
         obj.loc[k, "coord_dec"] = obj.coord_dec[0]
