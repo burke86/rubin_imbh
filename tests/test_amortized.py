@@ -86,6 +86,36 @@ def test_observe_null_without_agn_and_recovers_injected_rms():
         assert c in strong
 
 
+def test_npe_flow_is_calibrated_on_a_toy_problem():
+    """The flow + standardization + sampling machinery recovers a known Gaussian posterior."""
+    try:
+        import flowjax  # noqa: F401
+    except ImportError:
+        print("  (skipped: needs flowjax)")
+        return
+    from rubin_imbh.amortized.npe import NPE, FlowSpec
+
+    rng = np.random.default_rng(3)
+    n = 4000
+    theta = rng.normal(0, 1, (n, 2))
+    df = pd.DataFrame({"redshift": theta[:, 0], "log_stellar_mass": theta[:, 1]})
+    for j, b in enumerate("ugrizy"):  # x = noisy linear functions of theta, as coadd fluxes
+        df[f"coadd_{b}"] = 1e4 * (1 + 0.3 * theta[:, j % 2] + 0.05 * rng.normal(size=n))
+        df[f"coadd_err_{b}"] = 500.0
+    for b in "griz":
+        for c in ("nEpoch", "xsAbs", "rmsErr", "varSigClip"):
+            df[f"{b}_{c}"] = np.nan
+    df["all_varSigClip"], df["all_dof"] = np.nan, 0
+    spec = FlowSpec(flow_layers=2, nn_width=32, nn_depth=1, theta=("redshift", "log_stellar_mass"))
+    npe = NPE.train(df.iloc[:3500], spec, max_epochs=40, max_patience=5, show_progress=False)
+    s = npe.sample(df.iloc[3500:], n_samples=200)
+    true = theta[3500:]
+    lo, hi = np.percentile(s, [16, 84], axis=1)
+    cov = np.mean((true >= lo) & (true <= hi), axis=0)
+    assert np.all(np.abs(cov - 0.68) < 0.1), cov
+    assert np.all(np.abs(np.median(s, axis=1) - true).mean(axis=0) < 0.3)
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

@@ -42,7 +42,9 @@ class Priors:
     ebv_min: float = 1.0e-3
     agn_fraction: float = 0.5           # the rest have no AGN
     log_L5100_erg_range: tuple[float, float] = (40.0, 46.0)  # log-uniform, erg/s
-    no_agn_log_L5100_erg: float = 30.0  # negligible AGN for the no-AGN half
+    # the no-AGN half gets a negligible, continuous luminosity (normalizing flows handle a
+    # point mass badly); posteriors below ~10^40 erg/s mean "no detectable AGN"
+    no_agn_log_L5100_erg_range: tuple[float, float] = (36.0, 40.0)
     # asymptotic fractional rms (SF_inf / sqrt(2)) at rest-frame 5100 A; the rms seen over a
     # DP2-length baseline is lower for tau_obs comparable to or longer than the baseline
     fvar_median: float = 0.15
@@ -54,7 +56,7 @@ class Priors:
 
     def draw(self, n: int, rng: np.random.Generator) -> dict[str, np.ndarray]:
         has_agn = rng.random(n) < self.agn_fraction
-        log_L = np.where(has_agn, rng.uniform(*self.log_L5100_erg_range, n), self.no_agn_log_L5100_erg)
+        log_L = np.where(has_agn, rng.uniform(*self.log_L5100_erg_range, n), rng.uniform(*self.no_agn_log_L5100_erg_range, n))
         ebv_gal = np.maximum(np.abs(rng.normal(0, self.ebv_gal_sigma, n)), self.ebv_min)
         ebv_agn = np.maximum(np.abs(rng.normal(0, self.ebv_agn_sigma, n)), self.ebv_min)
         return {

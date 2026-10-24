@@ -31,6 +31,7 @@ CC-IN2P3), so the pipeline runs there; it is tested locally on mock catalogs.
 - `amortized/simulator_proto.py` — jaxsedfit as a batched host+AGN LSST photometry simulator (feasibility)
 - `scripts/export_survey_library.py` — DP2 noise/cadence library for the simulator (RSP)
 - `scripts/make_training_set.py` — amortized-inference training set (priors → jaxsedfit → DP2 observables)
+- `scripts/train_flow.py` — train/evaluate the neural posterior estimator (`rubin_imbh/amortized/npe.py`)
 - `scripts/depth_map.py` — coadd 5σ depth per HEALPix pixel from object_collection; finds DP2's depth layers
 - `scripts/simulate_clip_null.py` — regenerates the null table for `varSigClip`
 - `tests/test_pipeline.py` — mock-data tests (`python tests/test_pipeline.py`)
@@ -193,8 +194,25 @@ Smoke test (mock DDF library, 4000 objects, 17 s incl. compile): variable fracti
 without AGN. Survey library: `scripts/export_survey_library.py` (run on the RSP; DDF cones plus
 WFD cones at several ecliptic latitudes).
 
-Next: run the library export on the RSP; flow training (flowjax/optax) on the training set;
-calibration on held-out simulations; validation on CDF-S.
+Neural posterior estimator (`rubin_imbh/amortized/npe.py`, `scripts/train_flow.py`; flowjax
+19 + equinox 0.13 installed in the jaxcpu env with jax pinned at 0.6.2): masked autoregressive
+flow with rational-quadratic splines conditioned on x (coadd luptitudes + log errors; per-band
+excess-variance S/N, clipped significance, nights; combined statistic), θ = (z, log M*,
+log λL5100, log E(B−V)_gal, log SFH age), standardized. The no-AGN half of the prior is
+continuous at λL5100 = 10^36–40 erg/s (flows handle point masses badly).
+
+First result (mock DDF library, 36k training / 4k held-out, 60 epochs, ~90 s CPU training):
+posteriors calibrated (68/95% coverage 0.66–0.70 / 0.94); photo-z NMAD 0.089 with 28%
+outliers (weak: small training set, uniform 0–3 redshift prior, crude mock noise); log M*
+scatter 0.5 dex. For variable objects, variability inputs vs photometry-only (ablation,
+`--no-variability`): L_AGN scatter 0.51 vs 1.7 dex (bias −0.04 vs −1.06, posterior width 1.2 vs
+5.6 dex); log M* bias +0.08 vs +0.82 dex (AGN light mistaken for stars without variability);
+coverage 0.67/0.94 vs 0.50/0.89. The variability model was still improving at epoch 60, so
+all-object comparisons are not yet fair.
+
+Next: real survey library (RSP export); ~10^6 simulations and longer training; photo-z
+improvements (population priors by reweighting, see below in the conversation log);
+validation on CDF-S.
 
 ## DIA-source calibration history (Oct 2026)
 
