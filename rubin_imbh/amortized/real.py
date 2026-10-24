@@ -8,6 +8,9 @@ flux^2, as in ``observe()``), ``all_varSigClip``, ``all_dof``.
 
 For consistency with the simulator, the real statistics should come from a run with the
 same floor as ``ObserveConfig.sys_frac`` (default 0.75% in r, i, z) and nightly binning.
+Stars are not modelled: drop ``gaia_star`` objects (``scripts/gaia_flag.py``); ``pointlike``
+marks the remaining point sources (quasars, or stars fainter than Gaia's G ~ 21).
+
 The simulated coadd fluxes are total fluxes, so use a total-flux measurement (cModel /
 GAaP / Kron) rather than ``psfFlux``, which misses extended host light.
 """
@@ -28,8 +31,13 @@ def real_observables(stats: pd.DataFrame, flux_template: str = "{b}_psfFlux",
     if "psfFlux" in flux_template:
         warnings.warn("using PSF fluxes as coadd photometry: the simulator models total fluxes, so extended "
                       "hosts will look too faint; prefer a total-flux column (--flux-template)", stacklevel=2)
-    keep = [c for c in ("objectId", "coord_ra", "coord_dec", "refExtendedness", "envClean", "tile") if c in stats]
+    keep = [c for c in ("objectId", "coord_ra", "coord_dec", "refExtendedness", "envClean", "tile",
+                        "gaia_star", "gaia_qso", "gaia_sep") if c in stats]
     out = stats[keep].copy()
+    # point sources that Gaia does not confirm as stars: quasars, or stars too faint for Gaia
+    ext = stats["refExtendedness"].to_numpy(float) if "refExtendedness" in stats else np.full(len(stats), np.nan)
+    gstar = stats["gaia_star"].fillna(False).to_numpy(bool) if "gaia_star" in stats else np.zeros(len(stats), bool)
+    out["pointlike"] = (ext < 0.5) & ~gstar
     for b in BANDS:
         fc, ec = flux_template.format(b=b), err_template.format(b=b)
         missing = [c for c in (fc, ec) if c not in stats]

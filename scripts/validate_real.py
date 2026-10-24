@@ -57,6 +57,8 @@ def main(argv=None):
     p.add_argument("--match-arcsec", type=float, default=1.0)
     p.add_argument("--n-samples", type=int, default=300)
     p.add_argument("--extended-only", action="store_true")
+    p.add_argument("--keep-stars", action="store_true",
+                   help="keep Gaia stars (gaia_star, from scripts/gaia_flag.py) and reference stars; dropped by default")
     p.add_argument("--out", required=True, help="output prefix (.parquet with posteriors, .csv with metrics)")
     args = p.parse_args(argv)
     pd.set_option("display.width", 200)
@@ -66,6 +68,12 @@ def main(argv=None):
     stats = pd.read_parquet(Path(args.stats).expanduser())
     if "envClean" in stats:
         stats = stats[stats["envClean"].astype(bool)]
+    if not args.keep_stars and "gaia_star" in stats:
+        n0 = len(stats)
+        stats = stats[~stats["gaia_star"].fillna(False).astype(bool)]
+        print(f"dropped {n0 - len(stats)} Gaia stars")
+    elif not args.keep_stars:
+        print("no gaia_star column (run scripts/gaia_flag.py on --stats): stars are kept")
     if args.extended_only and "refExtendedness" in stats:
         stats = stats[stats["refExtendedness"] >= 0.5]
     obs = real_observables(stats, args.flux_template, args.err_template)
@@ -77,6 +85,8 @@ def main(argv=None):
         ref = pd.read_parquet(Path(args.reference).expanduser())
     obs = match_reference(obs, ref, args.match_arcsec)
     obs = obs[np.isfinite(obs["ref_z_ref"].to_numpy(float))].reset_index(drop=True)
+    if not args.keep_stars and "ref_is_star" in obs:
+        obs = obs[~obs["ref_is_star"].astype(bool)].reset_index(drop=True)
     print(f"{len(obs)} objects with a {args.reference} reference within {args.match_arcsec}\"")
     if len(obs) == 0:
         raise SystemExit("no matches")
@@ -119,6 +129,10 @@ def main(argv=None):
     for metric in ("nmad", "outlier"):
         print(f"\n{metric} by estimator:")
         print(table[[c for c in table.columns if c.endswith(f"_{metric}")]].rename(columns=lambda c: c.rsplit("_", 1)[0]).round(3).to_string())
+    if "pointlike" in obs:
+        for name, m in (("extended", ~obs["pointlike"].to_numpy(bool) & (obs["refExtendedness"].to_numpy(float) >= 0.5)),
+                        ("point-like, not a Gaia star", obs["pointlike"].to_numpy(bool))):
+            print(f"{name}: ", {k: round(v, 3) for k, v in photoz_metrics(obs["post_redshift_med"].to_numpy()[m], zref[m]).items()})
     if "ref_z_type" in obs:
         spec = obs["ref_z_type"].astype(str).eq("spec").to_numpy()
         if spec.sum() >= 5:

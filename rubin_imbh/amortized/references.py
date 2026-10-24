@@ -2,7 +2,7 @@
 
 Each builder returns a DataFrame with ``ra``, ``dec``, ``z_ref``, ``z_type`` (``spec`` or
 ``photo``) and, where available, ``logLX`` (log10 absorption-corrected 0.5-7 keV luminosity in
-erg/s) and ``is_xray_agn``.
+erg/s), ``is_xray_agn`` and ``is_star``.
 """
 
 from __future__ import annotations
@@ -35,7 +35,8 @@ def cdfs_xray_reference() -> pd.DataFrame:
         log_lx = np.log10(t["LXc"].to_numpy(float))
     return pd.DataFrame({"ra": t["RAJ2000"].to_numpy(float), "dec": t["DEJ2000"].to_numpy(float),
                          "z_ref": t["zF"].to_numpy(float), "z_type": np.where(is_spec, "spec", "photo"),
-                         "logLX": log_lx, "is_xray_agn": t["OType"].astype(str).str.strip().eq("AGN").to_numpy()})
+                         "logLX": log_lx, "is_xray_agn": t["OType"].astype(str).str.strip().eq("AGN").to_numpy(),
+                         "is_star": t["OType"].astype(str).str.strip().str.lower().eq("star").to_numpy()})
 
 
 def match_reference(objects: pd.DataFrame, ref: pd.DataFrame, radius_arcsec: float = 1.0,
