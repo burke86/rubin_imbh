@@ -26,6 +26,7 @@ CC-IN2P3), so the pipeline runs there; it is tested locally on mock catalogs.
 - `scripts/diagnose_objects.py` — outlier tails, airmass correlation, morphology and bright-star proximity of false positives (`rubin_imbh/objects.py`)
 - `scripts/validate_xray.py` — completeness and X-ray purity against CDF-S 7 Ms / E-CDF-S 250 ks AGN (VizieR)
 - `scripts/summarize_selection.py` — combine a tiled run; counts by tile, latitude, morphology, magnitude, route; sky map
+- `scripts/inspect_lightcurves.py` — light curves of sampled selected objects per tile, and which nights their excursions share
 - `scripts/depth_map.py` — coadd 5σ depth per HEALPix pixel from object_collection; finds DP2's depth layers
 - `scripts/simulate_clip_null.py` — regenerates the null table for `varSigClip`
 - `tests/test_pipeline.py` — mock-data tests (`python tests/test_pipeline.py`)
@@ -97,6 +98,16 @@ night (visit pairs defeat a leave-one-epoch-out). Statistics now use **nightly m
 default (`Cuts.nightly`, `--no-nightly` to disable): each band's epochs are averaged within a
 night (dayObs boundary 12:00 UTC) before any statistic, so the leave-one-out removes the
 worst night and variability must persist over ≥2 nights. `nEpoch` then counts nights.
+
+### Full DP2 run v2 (Oct 2026)
+
+99 tiles with |b| ≥ 25° plus 14 lower-latitude tiles finished before the cut. 3.19M rows
+selected *before* the bright-star flag (`envClean`) is applied; the run adds `envClean` but
+does not filter on it (767k selected point sources brighter than r = 18 are mostly vetoed
+bright stars). 75% enter only through the combined-band statistic and 86% lie within 10° of
+the ecliptic, including high-Galactic-latitude tiles (761, 764, 759, 758: b = −31 to −45°,
+|β| < 3°; tile 753 at β = −14° has ~2k). Under investigation with `inspect_lightcurves.py`:
+until understood, treat combined-route selections near the ecliptic as unreliable.
 
 ## DIA-source calibration history (Oct 2026)
 

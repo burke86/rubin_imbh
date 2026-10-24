@@ -21,6 +21,8 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("run_dir", help="tiled output directory (contains o<order>_p<pixel>/stats.parquet)")
     p.add_argument("--out", required=True, help="output prefix (.parquet and .png are added)")
+    p.add_argument("--include-vetoed", action="store_true",
+                   help="also summarize objects failing envClean (bright stars and their surroundings)")
     args = p.parse_args(argv)
     pd.set_option("display.width", 200)
 
@@ -35,6 +37,10 @@ def main(argv=None):
     d = pd.concat(parts, ignore_index=True)
     print(f"{len(done)} finished tiles, {len(files)} with selected objects; {len(d)} rows, "
           f"{d.objectId.nunique()} unique objectId")
+    if "envClean" in d and not args.include_vetoed:
+        n0 = len(d)
+        d = d[d["envClean"].astype(bool)].reset_index(drop=True)
+        print(f"envClean only (no r<18 star within the veto radius, not a bright star itself): {len(d)} of {n0}")
 
     import astropy.units as u
     from astropy.coordinates import SkyCoord
