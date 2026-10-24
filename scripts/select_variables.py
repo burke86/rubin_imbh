@@ -132,6 +132,13 @@ def cmd_run(args):
         logging.info("dask dashboard: %s", client.dashboard_link)
         # open once for the schema (no data read), then reopen with only the needed columns
         extra = ("diaSource",) if args.keep_dia_source and args.source == "dia" else ()
+        if args.keep_columns:
+            avail = set(getattr(open_dia(args.catalog), "all_columns", []))
+            want = [c.strip() for c in args.keep_columns.split(",") if c.strip()]
+            missing = [c for c in want if avail and c not in avail]
+            if missing:
+                logging.warning("--keep-columns not in catalog, skipped: %s", missing)
+            extra = extra + tuple(c for c in want if c not in missing)
         columns = needed_columns(open_dia(args.catalog), cols, extra, keep_lc=not (args.stats_only or args.no_select))
         logging.info("loading columns: %s", columns)
         cat = open_dia(args.catalog, args.cone, columns)
@@ -302,6 +309,8 @@ def main(argv=None):
                    "e.g. 'r_psfFlux > 1000' (object source: host selection)")
     r.add_argument("--extended-only", action="store_true", help="add refExtendedness >= 0.5 to the prefilter")
     r.add_argument("--keep-dia-source", action="store_true", help="dia source: also keep the nested diaSource column")
+    r.add_argument("--keep-columns", help="comma-separated extra top-level columns to carry into the output "
+                   "(e.g. coadd total fluxes and errors for validate_real.py)")
     r.add_argument("--min-dia-sources", type=int, default=Cuts.min_dia_sources, help="dia source only")
     r.add_argument("--min-epochs", type=int, default=Cuts.min_epochs)
     r.add_argument("--min-sig", type=float, default=Cuts.min_sig)

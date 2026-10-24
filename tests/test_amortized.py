@@ -150,6 +150,36 @@ def test_observe_zero_point_offsets_add_fractional_scatter():
     assert abs(np.std(frac[bright]) - np.sqrt(0.03**2 + np.median(noise[bright]) ** 2)) < 0.005
 
 
+def test_real_observables_match_training_features_and_reference_matching():
+    from rubin_imbh.amortized.npe import build_features
+    from rubin_imbh.amortized.real import real_observables
+    from rubin_imbh.amortized.references import match_reference
+
+    rng = np.random.default_rng(9)
+    lib = mock_library(500, rng, "ddf")
+    sim = observe(_sim(300, rng, 1e4), lib, Priors(), rng, ObserveConfig(layer="ddf"))
+    st = pd.DataFrame({"objectId": np.arange(300), "coord_ra": rng.uniform(150, 150.2, 300),
+                       "coord_dec": rng.uniform(2, 2.2, 300), "envClean": True})
+    for b in BANDS:
+        st[f"{b}_cModelFlux"], st[f"{b}_cModelFluxErr"] = sim[f"coadd_{b}"], sim[f"coadd_err_{b}"]
+    for b in "griz":
+        for c in ("nEpoch", "varSigClip", "rmsErr"):
+            st[f"{b}_{c}"] = sim[f"{b}_{c}"]
+        st[f"{b}_medFlux"] = sim[f"true_{b}"]
+        st[f"{b}_excessVar"] = sim[f"{b}_xsAbs"] / sim[f"true_{b}"] ** 2
+    st["all_varSigClip"], st["all_dof"] = sim["all_varSigClip"], sim["all_dof"]
+    obs = real_observables(st, "{b}_cModelFlux", "{b}_cModelFluxErr")
+    x_real, n_real = build_features(obs)
+    x_sim, n_sim = build_features(sim)
+    assert n_real == n_sim
+    np.testing.assert_allclose(x_real, x_sim, rtol=1e-5, atol=1e-5)
+    ref = pd.DataFrame({"ra": st.coord_ra[:100] + 0.2 / 3600, "dec": st.coord_dec[:100], "z_ref": np.arange(100) / 10.0,
+                        "z_type": "spec"})
+    m = match_reference(obs, ref, 1.0)
+    assert np.isfinite(m.ref_z_ref[:100]).all() and np.allclose(m.ref_z_ref[:100], np.arange(100) / 10.0)
+    assert m.ref_z_ref[100:].isna().all()
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

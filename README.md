@@ -33,6 +33,7 @@ CC-IN2P3), so the pipeline runs there; it is tested locally on mock catalogs.
 - `scripts/make_training_set.py` — amortized-inference training set (priors → jaxsedfit → DP2 observables)
 - `scripts/train_flow.py` — train/evaluate the neural posterior estimator (`rubin_imbh/amortized/npe.py`)
 - `scripts/fetch_cosmos2020_nzm.py` — COSMOS2020 photo-z vs r for the empirical p(z|m) prior (`rubin_imbh/amortized/nz_prior.py`)
+- `scripts/validate_real.py` — posteriors for real DP2 objects vs COSMOS2020 / CDF-S X-ray references and DP2 photo-z
 - `scripts/depth_map.py` — coadd 5σ depth per HEALPix pixel from object_collection; finds DP2's depth layers
 - `scripts/simulate_clip_null.py` — regenerates the null table for `varSigClip`
 - `tests/test_pipeline.py` — mock-data tests (`python tests/test_pipeline.py`)
@@ -230,8 +231,18 @@ Calibration slips slightly with resampling (duplicated objects; some parameters 
 for 95%); more simulations should fix it. That run capped weights at 50× the median, which
 under-corrects bright magnitudes; the cap is now 10⁴.
 
-Next: real survey library (RSP export); ~10^6 simulations and longer training; extend the
-redshift range beyond 3; photo-z improvements (population priors applied by reweighting posterior samples, p_pop(θ)/p_train(θ), so they can change without retraining);
+Simulator now spans z = 0.02–4 and adds per-band 1% zero-point offsets to the coadd fluxes.
+Real-data validation (`scripts/validate_real.py`, `rubin_imbh/amortized/real.py`,
+`references.py`): converts pipeline stats into the training observables (`--keep-columns` on
+`select_variables.py` carries coadd total-flux columns; run it with the simulator's floor),
+samples posteriors, matches COSMOS2020 photo-z or CDF-S 7 Ms X-ray sources (spec-z flagged,
+absorption-corrected L_X), and reports photo-z NMAD / outliers / bias by r magnitude for ours
+and for DP2's photo-z on the same objects, 68% coverage, and L5100 vs L_X for X-ray AGN.
+On mock "real" data it reproduces evaluate() (NMAD 0.021, outliers 10.6%); by magnitude
+NMAD 0.013 / outliers 1% at r < 21 rising to 0.12 / 37% at r = 24–25.5.
+
+Next: real survey library (RSP export); ~10^6 simulations and longer training; photo-z
+improvements (population priors applied by reweighting posterior samples, p_pop(θ)/p_train(θ), so they can change without retraining);
 validation on CDF-S.
 
 ## DIA-source calibration history (Oct 2026)
