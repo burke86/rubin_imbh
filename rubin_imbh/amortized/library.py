@@ -9,7 +9,7 @@ Library format (one row per real Object; written by ``scripts/export_survey_libr
                                      difference-flux errors (nJy), after flag cuts
 
 A simulated object borrows the coadd errors, cadence and nightly errors of a library
-object of similar r-band brightness in the requested layer.
+object of similar i-band brightness in the requested layer.
 """
 
 from __future__ import annotations
@@ -50,17 +50,24 @@ def mock_library(n: int, rng: np.random.Generator, layer: str = "wfd") -> pd.Dat
     return pd.DataFrame(rows)
 
 
-def match_library(lib: pd.DataFrame, r_flux_njy: np.ndarray, rng: np.random.Generator,
-                  layer: str | None = None, k: int = 25) -> np.ndarray:
+def match_library(lib: pd.DataFrame, flux_njy: np.ndarray, rng: np.random.Generator,
+                  layer: str | None = None, k: int = 25, band: str = "i") -> np.ndarray:
     """Library row index for each simulated object: a random one of the ``k`` library objects
-    nearest in log r-band coadd flux (within ``layer`` if given)."""
-    pool = np.flatnonzero((lib["layer"] == layer).to_numpy()) if layer is not None else np.arange(len(lib))
+    nearest in log ``band`` coadd flux (within ``layer`` if given).
+
+    Library objects without a ``band`` coadd are left out. The default i band is present for
+    ~99% of DP2 Objects in both layers (r is missing for half of WFD), so the library's
+    missing-band patterns carry over to the simulations in their real proportions.
+    """
+    ref_all = lib[f"{band}_coadd_flux"].to_numpy(float)
+    keep = np.isfinite(ref_all) if layer is None else np.isfinite(ref_all) & (lib["layer"] == layer).to_numpy()
+    pool = np.flatnonzero(keep)
     if len(pool) == 0:
-        raise ValueError(f"no library objects in layer {layer!r}")
-    ref = np.log10(np.clip(lib["r_coadd_flux"].to_numpy(float)[pool], 1e-3, None))
+        raise ValueError(f"no library objects with a {band} coadd in layer {layer!r}")
+    ref = np.log10(np.clip(ref_all[pool], 1e-3, None))
     order = np.argsort(ref)
     ref_sorted = ref[order]
-    x = np.log10(np.clip(np.asarray(r_flux_njy, float), 1e-3, None))
+    x = np.log10(np.clip(np.asarray(flux_njy, float), 1e-3, None))
     pos = np.searchsorted(ref_sorted, x)
     k = min(k, len(pool))
     start = np.clip(pos - k // 2, 0, len(pool) - k)

@@ -37,10 +37,19 @@ def test_match_library_picks_similar_brightness():
     rng = np.random.default_rng(1)
     lib = pd.concat([mock_library(4000, rng, "wfd"), mock_library(1000, rng, "ddf")], ignore_index=True)
     target = 10 ** ((31.4 - np.array([19.0, 22.0, 25.0])) / 2.5)
-    idx = match_library(lib, np.repeat(target, 200), rng, layer="wfd", k=25)
+    idx = match_library(lib, np.repeat(target, 200), rng, layer="wfd", k=25, band="r")
     assert (lib.layer.iloc[idx] == "wfd").all()
     got = np.log10(lib.r_coadd_flux.to_numpy()[idx]).reshape(3, 200)
     assert np.all(np.abs(np.median(got, axis=1) - np.log10(target)) < 0.1)
+
+
+def test_match_library_keeps_missing_band_patterns():
+    rng = np.random.default_rng(2)
+    lib = mock_library(5000, rng, "wfd")
+    lib.loc[rng.random(len(lib)) < 0.5, ["r_coadd_flux", "r_coadd_err"]] = np.nan  # like DP2 WFD
+    target = 10 ** ((31.4 - rng.uniform(19, 25, 4000)) / 2.5)
+    idx = match_library(lib, target, rng, layer="wfd")
+    assert abs(lib.r_coadd_flux.iloc[idx].isna().mean() - 0.5) < 0.05
 
 
 def _sim(n, rng, varagn_njy):
@@ -148,6 +157,18 @@ def test_observe_zero_point_offsets_add_fractional_scatter():
     noise = out["coadd_err_r"] / out["true_r"]
     bright = (31.4 - 2.5 * np.log10(out["true_r"])) < 20.5  # measurement noise << 3%
     assert abs(np.std(frac[bright]) - np.sqrt(0.03**2 + np.median(noise[bright]) ** 2)) < 0.005
+
+
+def test_bright_null_is_standard_with_injected_floor_scatter():
+    rng = np.random.default_rng(10)
+    lib = mock_library(3000, rng, "ddf")
+    sim = _sim(3000, rng, 0.0)
+    for b in BANDS:  # r ~ 19: the 0.75% floor dominates the photon noise
+        sim[f"true_{b}"] = 10 ** ((31.4 - 19.0) / 2.5)
+    sig = observe(sim, lib, Priors(), rng, ObserveConfig(layer="ddf"))["r_varSigClip"]
+    assert abs(np.median(sig)) < 0.25 and 0.8 < 1.4826 * np.median(np.abs(sig - np.median(sig))) < 1.25
+    flat = observe(sim, lib, Priors(), rng, ObserveConfig(layer="ddf", inject_sys=False))["r_varSigClip"]
+    assert np.median(flat) < -1.0  # without the scatter the floor makes bright objects look too constant
 
 
 def test_band_dropout_hides_coadd_bands_independently():

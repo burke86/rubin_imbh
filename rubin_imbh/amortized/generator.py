@@ -125,6 +125,7 @@ class ObserveConfig:
     err_scale: float = 1.0
     var_bands: tuple[str, ...] = tuple("griz")  # bands whose variability summaries are kept
     match_k: int = 25
+    match_band: str = "i"  # brightness used to pick the library object (see match_library)
     # per-object, per-band multiplicative zero-point / calibration offsets (rms), so the network
     # does not over-trust colours; applied to the coadd fluxes
     zp_sigma: float = 0.01
@@ -132,6 +133,10 @@ class ObserveConfig:
     # the gaps borrowed from the library), so the network handles arbitrary missing bands; the
     # band's variability summaries are kept
     band_dropout: float = 0.0
+    # inject the per-night scatter that the sys_frac floor stands for (sys_frac x flux, per band):
+    # real nulls are calibrated to be ~standard with the floor, so without this bright simulated
+    # galaxies would look too constant (median all_varSigClip ~ -2 at r < 22)
+    inject_sys: bool = True
 
 
 def observe(sim: pd.DataFrame, library: pd.DataFrame, priors: Priors, rng: np.random.Generator,
@@ -145,7 +150,7 @@ def observe(sim: pd.DataFrame, library: pd.DataFrame, priors: Priors, rng: np.ra
     """
     n = len(sim)
     out = sim.copy()
-    idx = match_library(library, sim["true_r"].to_numpy(), rng, cfg.layer, cfg.match_k)
+    idx = match_library(library, sim[f"true_{cfg.match_band}"].to_numpy(), rng, cfg.layer, cfg.match_k, cfg.match_band)
     out["lib_index"] = idx
     lib = library.iloc[idx].reset_index(drop=True)
 
@@ -178,6 +183,8 @@ def observe(sim: pd.DataFrame, library: pd.DataFrame, priors: Priors, rng: np.ra
         B[i, : len(ts)] = bs[o]
     X = drw_unit_batch(T, var["tau_rest_days"] * (1.0 + z), rng)
 
+    floors = cfg.sys_frac if isinstance(cfg.sys_frac, dict) else {b: float(cfg.sys_frac) for b in BANDS}
+    sys_sigma = [floors.get(BANDS[j], 0.0) if cfg.inject_sys else 0.0 for j in vb]
     rows_obj, rows_band, rows_f, rows_e, rows_s = [], [], [], [], []
     for i in range(n):
         m = B[i] >= 0
@@ -189,6 +196,8 @@ def observe(sim: pd.DataFrame, library: pd.DataFrame, priors: Priors, rng: np.ra
             # order, so the band's errors line up with its selected epochs
             e = per_band_e[q][i]
             f = rms[i, j] * X[i, sel] + rng.normal(0.0, e[: sel.sum()])
+            if sys_sigma[q] > 0:
+                f = f + rng.normal(0.0, sys_sigma[q] * abs(out[f"true_{BANDS[j]}"].iat[i]), sel.sum())
             rows_obj.append(np.full(sel.sum(), i))
             rows_band.append(np.full(sel.sum(), BANDS[j]))
             rows_f.append(f)
