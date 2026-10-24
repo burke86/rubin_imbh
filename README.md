@@ -264,7 +264,7 @@ settings (Oct 2026, 125 GB server, 50 GB home quota):
 
 ```bash
 cd ~/rubin_imbh                       # git pull only when no run is in progress
-nohup python scripts/select_variables.py run --tile-order 3 --stats-only --min-abs-b 15 \
+nohup python scripts/select_variables.py run --tile-order 3 --stats-only --min-abs-b 25 \
     --err-scale 1.0 --sys-frac r=0.0075,i=0.0075,z=0.0075 --prefilter "refExtendedness >= 0" \
     --bright-stars ~/wfd_pilot/bright_stars_r18.parquet --chunk-objects 5000 \
     --n-workers 3 --memory-limit 24GB --out ~/dp2_variables_v2 >> ~/dp2_variables_v2.log 2>&1 &
@@ -273,7 +273,7 @@ nohup python scripts/select_variables.py run --tile-order 3 --stats-only --min-a
 | setting | why |
 |---|---|
 | `--stats-only` | selected objects' statistics only (<1 GB); all-Object stats or light curves would exceed the 50 GB quota. Fetch light curves for candidates later by `objectId`. |
-| `--min-abs-b 15` | skip tiles centred within 15° of the Galactic plane: slowest (crowded) and dominated by extinction and variable stars, of little use for nuclear AGN/TDEs |
+| `--min-abs-b 25` | skip tiles centred within 25° of the Galactic plane: slowest (crowded) and dominated by extinction and variable stars, of little use for nuclear AGN/TDEs. 15° was not enough: tile 688 (RA 225, Dec −36, b = +20°, towards the inner Galaxy) has 284 partitions and twice took the whole RSP server down mid-tile (no error in the log, "server not running"). |
 | `--err-scale 1.0` | object-source errors are already calibrated (ECDFS, WFD) |
 | `--sys-frac r,i,z = 0.75%` | chosen from the CDF-S X-ray floor scan (0.5–1% optimum); `fit_floor.py`'s suggestion over-picks |
 | `--prefilter "refExtendedness >= 0"` | drops Objects with degenerate photometry (no extendedness) |
@@ -286,7 +286,9 @@ min); ~3–5 h for the high-latitude sky. Run one job at a time: a second job co
 memory and cores.
 
 Keep the server alive: the RSP shuts the server down (killing the job) when the browser
-disconnects, e.g. when the laptop sleeps. Keep the RSP tab open and run `caffeinate -dims`
+disconnects, e.g. when the laptop sleeps, and a tile that exhausts memory can take the server
+down too (see `--min-abs-b`). After any "server not running", restart the server (largest
+size), check `_DONE` count and the last `took` line, and rerun the same command. Keep the RSP tab open and run `caffeinate -dims`
 in a terminal on the Mac (plugged in, lid open) until the run finishes.
 
 Monitor:
@@ -314,8 +316,10 @@ print(len(d), "selected;", d.objectId.nunique(), "unique;", int((d.nVarBands >= 
 PY
 ```
 
-Low-latitude tiles finished before `--min-abs-b` was added (448–452) remain in the
-output; drop them with a |b| cut or keep them as a stellar-variability control. To profile
+Low-latitude tiles finished before the latitude cut was raised (448–452 at |b| < 15°, and
+others between 15° and 25°) remain in the output; drop them with a |b| cut or keep them as a
+stellar-variability control. CPU was ~77% idle with 3 workers, so on sparse sky more workers
+(e.g. 6 × 14 GB) should be faster; keep 3 × 24 GB when dense tiles remain. To profile
 a tile, add `--profile tile.html` (dask performance report). For the dia source add
 `--source dia` (and `--min-dia-sources`, `--object-catalog`).
 
