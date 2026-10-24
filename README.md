@@ -28,6 +28,7 @@ CC-IN2P3), so the pipeline runs there; it is tested locally on mock catalogs.
 - `scripts/summarize_selection.py` — combine a tiled run; counts by tile, latitude, morphology, magnitude, route; sky map
 - `scripts/inspect_lightcurves.py` — light curves of sampled selected objects per tile, and which nights their excursions share
 - `scripts/gaia_flag.py` — Gaia DR3 crossmatch (remote HATS): flags stars (parallax/PM > 5σ), quasar candidates, Gaia variables
+- `amortized/simulator_proto.py` — jaxsedfit as a batched host+AGN LSST photometry simulator (feasibility)
 - `scripts/depth_map.py` — coadd 5σ depth per HEALPix pixel from object_collection; finds DP2's depth layers
 - `scripts/simulate_clip_null.py` — regenerates the null table for `varSigClip`
 - `tests/test_pipeline.py` — mock-data tests (`python tests/test_pipeline.py`)
@@ -148,6 +149,28 @@ Next:
 2. Ecliptic test above; WFD validation against known quasars (e.g. Milliquas).
 3. Later: classification (stochastic vs flare, DIA nuclear offset), coadd total-flux columns
    for host photometry.
+
+## Amortized joint inference (started Oct 2026)
+
+Goal: posteriors for redshift, stellar mass, SFH, dust and AGN luminosity per object from
+coadd photometry plus the host-free variability amplitude, via a neural posterior estimator
+trained on jaxsedfit simulations (DDFs as the test set).
+
+Feasibility (`amortized/simulator_proto.py`, jaxcpu env, laptop CPU): jaxsedfit's NumPyro
+model wrapped with `seed` + `substitute` + `trace` (likelihood off, `include_components=True`)
+and `jit(vmap(...))` simulates LSST ugrizy total, host and AGN fluxes (mJy) at **0.47 ms per
+object** after a 3–4 s compile (context build 4 s, wide redshift grid 0.02–3): ~8 min per
+10⁶ simulations, no GPU needed for simulating. Sampled sites include redshift,
+log_stellar_mass, delayed-SFH age/tau, log_ebv_gal/agn, log_agn_amp (ln λL_λ(5100 Å) in W),
+disk slopes, torus, line strengths/widths, dust_alpha. jaxsedfit's fitting priors are not
+population priors: log-uniform E(B−V) up to ~10 mag gives near-zero fluxes, SFH age is not
+bounded by the age of the universe, and the default AGN-luminosity prior is seeded from the
+observed photometry, so the simulator needs its own population priors.
+
+Next: population priors (redshift, mass function, SFH, dust, AGN luminosity/fraction); AGN
+variability model (amplitude vs luminosity and wavelength, sampled at real DP2 cadences and
+reduced with the pipeline's statistic); empirical DP2 noise/cadence library (RSP export);
+flow training (flowjax/optax); validation on CDF-S.
 
 ## DIA-source calibration history (Oct 2026)
 
