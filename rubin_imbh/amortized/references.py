@@ -39,6 +39,26 @@ def cdfs_xray_reference() -> pd.DataFrame:
                          "is_star": t["OType"].astype(str).str.strip().str.lower().eq("star").to_numpy()})
 
 
+def milliquas_reference(cache="data/milliquas.parquet") -> pd.DataFrame:
+    """Milliquas (Flesch 2023, VizieR VII/294) quasars and AGN with spectroscopic classification
+    (Type starting with Q, A, B, K, N or L) and z > 0, downloaded once and cached as parquet."""
+    path = Path(cache).expanduser()
+    if path.exists():
+        t = pd.read_parquet(path)
+    else:
+        from astroquery.vizier import Vizier
+
+        t = Vizier(columns=["RAJ2000", "DEJ2000", "Name", "Type", "Rmag", "z"], row_limit=-1).get_catalogs("VII/294")[0].to_pandas()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        t.to_parquet(path)
+    typ = t["Type"].astype(str).str.strip()
+    keep = typ.str[:1].isin(list("QABKNL")) & (t["z"].astype(float) > 0)
+    t = t[keep]
+    return pd.DataFrame({"ra": t["RAJ2000"].to_numpy(float), "dec": t["DEJ2000"].to_numpy(float),
+                         "z_ref": t["z"].to_numpy(float), "z_type": "spec", "mq_type": typ[keep].to_numpy(),
+                         "is_xray_agn": False})
+
+
 def match_reference(objects: pd.DataFrame, ref: pd.DataFrame, radius_arcsec: float = 1.0,
                     ra: str = "coord_ra", dec: str = "coord_dec") -> pd.DataFrame:
     """Nearest reference within ``radius_arcsec`` for each object (columns prefixed ``ref_``)."""

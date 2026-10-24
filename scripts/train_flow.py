@@ -27,15 +27,15 @@ def main(argv=None):
     p.add_argument("--out", required=True)
     p.add_argument("--test-frac", type=float, default=0.1)
     p.add_argument("--max-epochs", type=int, default=200)
-    p.add_argument("--patience", type=int, default=10)
-    p.add_argument("--batch-size", type=int, default=512)
-    p.add_argument("--learning-rate", type=float, default=1e-3)
+    p.add_argument("--patience", type=int, default=5)
+    p.add_argument("--batch-size", type=int, default=2048)
+    p.add_argument("--learning-rate", type=float, default=2e-3)
     p.add_argument("--layers", type=int, default=FlowSpec.flow_layers)
     p.add_argument("--width", type=int, default=FlowSpec.nn_width)
     p.add_argument("--no-variability", action="store_true", help="photometry-only inputs (ablation)")
     p.add_argument("--nzm", help="empirical p(z|m) catalogue (fetch_cosmos2020_nzm.py output): resample the "
                    "training and held-out sets to it before training")
-    p.add_argument("--nzm-oversample", type=float, default=2.0,
+    p.add_argument("--nzm-oversample", type=float, default=1.0,
                    help="resampled set size in units of the effective sample size (capped at the input size)")
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args(argv)

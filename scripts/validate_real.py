@@ -8,7 +8,8 @@
 ``--stats``: a ``select_variables.py run --no-select --stats-only`` output for the field, run
 with the simulator's floor (``--sys-frac r=0.0075,i=0.0075,z=0.0075``) and keeping the coadd
 flux and error columns (``--keep-columns``). ``--reference``: ``cosmos2020`` (COSMOS2020 photo-z)
-or ``cdfs-xray`` (CDF-S 7 Ms sources, spec-z where available, with L_X). ``--photoz``: optional
+``cdfs-xray`` (CDF-S 7 Ms sources, spec-z where available, with L_X) or ``milliquas``
+(spectroscopic quasars/AGN anywhere, e.g. for the WFD variable sample). ``--photoz``: optional
 table with ``objectId`` and DP2 photo-z columns (export_photoz.py); every
 ``*_z_median`` estimator is compared on the same objects.
 
@@ -28,7 +29,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rubin_imbh.amortized.real import real_observables  # noqa: E402
-from rubin_imbh.amortized.references import cdfs_xray_reference, cosmos2020_reference, match_reference  # noqa: E402
+from rubin_imbh.amortized.references import (  # noqa: E402
+    cdfs_xray_reference, cosmos2020_reference, match_reference, milliquas_reference)
 
 MAG_BINS = [-np.inf, 21, 22, 23, 24, 25.5]
 
@@ -49,13 +51,13 @@ def main(argv=None):
     p.add_argument("--flux-template", default="{b}_psfFlux")
     p.add_argument("--err-template", default="{b}_psfFluxErr")
     p.add_argument("--reference", required=True,
-                   help="cosmos2020, cdfs-xray, or a parquet file with ra, dec, z_ref, z_type (and optionally logLX, is_xray_agn)")
+                   help="cosmos2020, cdfs-xray, milliquas (spectroscopic quasars/AGN), or a parquet file with ra, dec, z_ref, z_type (and optionally logLX, is_xray_agn)")
     p.add_argument("--cosmos2020", default="data/cosmos2020_classic_zr.parquet")
     p.add_argument("--photoz", help="table with objectId and DP2 photo-z column(s)")
     p.add_argument("--photoz-column", help="photo-z column(s) in --photoz, comma-separated "
                    "(default: every *_z_median column, e.g. bpz, dnf, fzboost, gpz, knn, tpz)")
     p.add_argument("--match-arcsec", type=float, default=1.0)
-    p.add_argument("--n-samples", type=int, default=300)
+    p.add_argument("--n-samples", type=int, default=100)
     p.add_argument("--extended-only", action="store_true")
     p.add_argument("--keep-stars", action="store_true",
                    help="keep Gaia stars (gaia_star, from scripts/gaia_flag.py) and reference stars; dropped by default")
@@ -81,6 +83,8 @@ def main(argv=None):
         ref = cosmos2020_reference(args.cosmos2020)
     elif args.reference == "cdfs-xray":
         ref = cdfs_xray_reference()
+    elif args.reference == "milliquas":
+        ref = milliquas_reference()
     else:
         ref = pd.read_parquet(Path(args.reference).expanduser())
     obs = match_reference(obs, ref, args.match_arcsec)
@@ -97,6 +101,16 @@ def main(argv=None):
     for j, name in enumerate(th):
         obs[f"post_{name}_med"] = np.median(s[:, :, j], axis=1)
         obs[f"post_{name}_lo"], obs[f"post_{name}_hi"] = np.percentile(s[:, :, j], [16, 84], axis=1)
+    if "log_L5100_erg" in th:
+        # the same posteriors under a population AGN prior (Eddington-ratio distribution), by
+        # importance reweighting: columns pop_<theta>_{med,lo,hi}, p_agn_{train,pop} (L5100 > 1e40)
+        from rubin_imbh.amortized.agn_prior import reweight, weighted_quantiles
+
+        w, ess = reweight(s, th)
+        for j, name in enumerate(th):
+            obs[f"pop_{name}_lo"], obs[f"pop_{name}_med"], obs[f"pop_{name}_hi"] = weighted_quantiles(s[:, :, j], w, (0.16, 0.5, 0.84))
+        agn = s[:, :, th.index("log_L5100_erg")] > 40.0
+        obs["p_agn_train"], obs["p_agn_pop"], obs["pop_ess"] = agn.mean(axis=1), (w * agn).sum(axis=1), ess
     if args.photoz:
         pz = pd.read_parquet(Path(args.photoz).expanduser())
         pz_cols = (args.photoz_column.split(",") if args.photoz_column
@@ -149,6 +163,14 @@ def main(argv=None):
             rho = pd.Series(lo).corr(pd.Series(lx), method="spearman")
             print(f"\n=== X-ray AGN (n={agn.sum()}, variable {var.sum()}): Spearman(log L5100 posterior, log LX) = {rho:.2f}; "
                   f"median log(L5100/LX) = {np.median(lo - lx):.2f} (variable: {np.median((lo - lx)[var]) if var.any() else np.nan:.2f})")
+            if "p_agn_pop" in obs:
+                lp = obs["pop_log_L5100_erg_med"].to_numpy()[agn]
+                print(f"    population AGN prior: Spearman {pd.Series(lp).corr(pd.Series(lx), method='spearman'):.2f}; "
+                      f"median log(L5100/LX) = {np.median(lp - lx):.2f} (variable: {np.median((lp - lx)[var]) if var.any() else np.nan:.2f})")
+                notx = ~obs["ref_is_xray_agn"].fillna(False).astype(bool).to_numpy()
+                for name, m in (("X-ray AGN", agn), ("X-ray AGN, variable", agn & (obs["all_varSigClip"].to_numpy(float) >= 5)),
+                                ("not X-ray AGN", notx)):
+                    print(f"    mean P(AGN): {name:22s} training prior {obs['p_agn_train'][m].mean():.2f}, population prior {obs['p_agn_pop'][m].mean():.2f}")
 
     out = Path(args.out).expanduser()
     obs.to_parquet(out.with_suffix(".parquet"))

@@ -140,6 +140,24 @@ class ObserveConfig:
     inject_sys: bool = True
 
 
+def redraw_coadds(df: pd.DataFrame, zp_sigma: float, rng: np.random.Generator) -> pd.DataFrame:
+    """Draw ``coadd_<b> = true_<b> x (1 + zp_sigma N) + N(0, coadd_err_<b>)`` in place.
+
+    Bands already missing (NaN ``coadd_<b>`` after band dropout) stay missing, so an existing
+    training set can be given a different calibration error without re-running the SED
+    simulation; the variability statistics do not depend on the coadds.
+    """
+    n = len(df)
+    for b in BANDS:
+        err = df[f"coadd_err_{b}"].to_numpy(float)
+        zp = 1.0 + zp_sigma * rng.standard_normal(n)
+        new = df[f"true_{b}"].to_numpy(float) * zp + rng.normal(0.0, np.nan_to_num(err))
+        if f"coadd_{b}" in df:
+            new = np.where(df[f"coadd_{b}"].isna().to_numpy(), np.nan, new)
+        df[f"coadd_{b}"] = np.where(np.isfinite(err), new, np.nan)
+    return df
+
+
 def observe(sim: pd.DataFrame, library: pd.DataFrame, priors: Priors, rng: np.random.Generator,
             cfg: ObserveConfig = ObserveConfig()) -> pd.DataFrame:
     """Add DP2-like observables to simulated objects (columns ``true_<b>``, ``varagn_<b>``, ``redshift``).
@@ -157,10 +175,8 @@ def observe(sim: pd.DataFrame, library: pd.DataFrame, priors: Priors, rng: np.ra
 
     # coadd photometry, with calibration offsets
     for b in BANDS:
-        err = lib[f"{b}_coadd_err"].to_numpy(float)
-        zp = 1.0 + cfg.zp_sigma * rng.standard_normal(n)
-        out[f"coadd_{b}"] = out[f"true_{b}"].to_numpy() * zp + rng.normal(0.0, err)
-        out[f"coadd_err_{b}"] = err
+        out[f"coadd_err_{b}"] = lib[f"{b}_coadd_err"].to_numpy(float)
+    redraw_coadds(out, cfg.zp_sigma, rng)
 
     # variability: shared unit DRW at the union of each object's nights, scaled per band
     var = priors.draw_variability(n, rng)

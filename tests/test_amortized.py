@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from rubin_imbh.amortized.generator import ObserveConfig, Priors, observe  # noqa: E402
+from rubin_imbh.amortized.generator import ObserveConfig, Priors, observe, redraw_coadds  # noqa: E402
 from rubin_imbh.amortized.library import BANDS, match_library, mock_library  # noqa: E402
 from rubin_imbh.amortized.variability import drw_unit_batch, fvar_by_band  # noqa: E402
 
@@ -184,6 +184,18 @@ def test_band_dropout_hides_one_band_per_object():
     assert np.isfinite(x).all() and np.allclose(x[:, names.index("has_r")], ~missing[:, 2])
 
 
+def test_redraw_coadds_changes_calibration_error_and_keeps_gaps():
+    rng = np.random.default_rng(11)
+    lib = mock_library(3000, rng, "ddf")
+    out = observe(_sim(4000, rng, 0.0), lib, Priors(), rng, ObserveConfig(layer="ddf", sys_frac={}, band_dropout=0.3))
+    gaps = out["coadd_g"].isna().to_numpy()
+    redrawn = redraw_coadds(out.copy(), 0.05, rng)
+    assert np.array_equal(redrawn["coadd_g"].isna().to_numpy(), gaps)
+    bright = ((31.4 - 2.5 * np.log10(out["true_r"])) < 20.5).to_numpy() & ~redrawn["coadd_r"].isna().to_numpy()
+    frac = ((redrawn["coadd_r"] - redrawn["true_r"]) / redrawn["true_r"])[bright]
+    assert 0.045 < np.std(frac) < 0.06
+
+
 def test_real_observables_match_training_features_and_reference_matching():
     from rubin_imbh.amortized.npe import build_features
     from rubin_imbh.amortized.real import real_observables
@@ -220,3 +232,25 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             fn()
             print(f"{name}: ok")
+
+
+def test_agn_prior_reweighting_reproduces_population_prior():
+    from rubin_imbh.amortized.agn_prior import EddingtonRatioPrior, reweight, weighted_quantiles
+
+    rng = np.random.default_rng(12)
+    pri, pop = Priors(), EddingtonRatioPrior()
+    n = 200_000  # one "object" whose posterior equals the training prior, at fixed M* and z
+    has = rng.random(n) < pri.agn_fraction
+    log_l = np.where(has, rng.uniform(*pri.log_L5100_erg_range, n), rng.uniform(*pri.no_agn_log_L5100_erg_range, n))
+    s = np.stack([np.full(n, 0.5), np.full(n, 10.5), log_l], axis=-1)[None]
+    w, ess = reweight(s, ["redshift", "log_stellar_mass", "log_L5100_erg"], pop, pri)
+    p_agn = (w[0] * (log_l > 40)).sum()
+    f = min(pop.f_agn_z0 * 1.5 ** pop.z_evolution, pop.f_max)
+    # target: f of the mass in the AGN part, minus the part of the ERDF below L5100 = 1e40
+    lam40 = pop.log_lam(np.array([40.0]), np.array([10.5]))[0]
+    g = pop.gamma * np.log(10)
+    lo, hi = pop.log_lam_range
+    below = (np.exp(g * max(lam40, lo)) - np.exp(g * lo)) / (np.exp(g * hi) - np.exp(g * lo))
+    assert abs(p_agn - f * (1 - below)) < 0.01 and ess[0] > 1000
+    med = weighted_quantiles(log_l[None], w, (0.5,))[0, 0]
+    assert 36 < med < 46
