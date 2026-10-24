@@ -112,6 +112,43 @@ until understood, treat combined-route selections near the ecliptic as unreliabl
 star veto had been applied: `gaia_flag.py` adds one (stars, including high-proper-motion stars
 that fake variability in difference images; Gaia quasar candidates are kept).
 
+### Clean variable sample (Oct 2026)
+
+`summarize_selection.py ~/dp2_variables_v2_gaia.parquet --out ~/dp2_clean`:
+3,192,268 selected → 1,725,492 `envClean` → **731,886 after dropping Gaia stars**
+(`gaia_flag.py`: 60% of all selections are Gaia stars with parallax/PM > 5σ, 83% of the
+point-like ones; 36k Gaia quasar candidates kept). The clean sample is 66% extended; routes:
+per-band only 28k, combined only 515k, both 188k. The DDF tiles now rank high (ELAIS-S1 552:
+23.6k, EDFS 536: 17.6k). For science use also drop |b| < 25° (tiles finished before the cut,
+e.g. 671, 670, 458, 677: 100% combined-route): `d[d.gal_b.abs() >= 25]`.
+
+**Open issue: ecliptic concentration.** 82% of the clean sample lies within |β| < 10°, the
+same fraction as before the Gaia cut, and it includes galaxies (tiles 761, 764, 759, 758 at
+b = −31 to −45°: 26–38k each, ~72% extended). Leading explanation: DP2 sampled the ecliptic
+band much more densely (tile 290: median 17/15/6 nights in r/i/z vs 2/4/3 in tile 753), so
+more real variables are detectable, as in the DDFs; not yet excluded: an ecliptic-specific
+systematic. Pending test: selected fraction of faint galaxies vs `all_dof` in an ecliptic tile
+(761) and an off-ecliptic one (724), from `--no-select` runs (command in the conversation log;
+equal fractions at equal dof → sampling, not a systematic). `inspect_lightcurves.py` is the
+follow-up if a systematic is indicated.
+
+## Status and next steps (Oct 2026)
+
+Done: variability selection over DP2 (object source, nightly means, per-band + combined
+statistics, environment and Gaia cuts), calibrated on ECDFS/CDF-S and a WFD pilot.
+Outputs on the RSP: `~/dp2_variables_v2/` (tiles), `~/dp2_variables_v2_gaia.parquet`,
+`~/dp2_clean.parquet`.
+
+Next:
+1. **Amortized joint inference** (AGN luminosity + photo-z + stellar mass, using the
+   host-free variability amplitude): a neural posterior estimator trained on jaxsedfit
+   simulations, with DP2 noise/cadence drawn from an empirical survey library and the DDFs
+   (CDF-S/COSMOS spec-z, X-ray AGN, deep masses) as the test set. SN/TDE contaminants
+   ignored for now.
+2. Ecliptic test above; WFD validation against known quasars (e.g. Milliquas).
+3. Later: classification (stochastic vs flare, DIA nuclear offset), coadd total-flux columns
+   for host photometry.
+
 ## DIA-source calibration history (Oct 2026)
 
 Everything below up to "What it does" was measured with `--source dia`; the object source
