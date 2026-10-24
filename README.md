@@ -252,9 +252,53 @@ and for DP2's photo-z on the same objects, 68% coverage, and L5100 vs L_X for X-
 On mock "real" data it reproduces evaluate() (NMAD 0.021, outliers 10.6%); by magnitude
 NMAD 0.013 / outliers 1% at r < 21 rising to 0.12 / 37% at r = 24–25.5.
 
-Next: real survey library (RSP export); ~10^6 simulations and longer training; photo-z
-improvements (population priors applied by reweighting posterior samples, p_pop(θ)/p_train(θ), so they can change without retraining);
-validation on CDF-S.
+### Real survey library (Oct 24–25, 2026)
+
+Library: `export_survey_library.py --depth-map … --strip-ids` (cModel coadds; 167,685 rows,
+60k DDF + 108k WFD). DDF reaches r(S/N=5) ≈ 25.7 with ≥ 5 riz nights for every object; WFD
+reaches ≈ 24.6 and is patchy: no r coadd for 54% of Objects, no z for 53%, no u/y for ~73%
+(g and i nearly complete); median WFD nights per band 0–5.
+
+Simulator fixes found against real COSMOS statistics:
+- library matched on i, not r (matching on r never drew the missing-r half of WFD);
+- the 0.75% floor's scatter is now injected (`inject_sys`): before, bright simulated galaxies
+  had median all_varSigClip −2 vs +0.2 real; after, the simulated null is N(0, 1) at all
+  magnitudes (real COSMOS galaxies: median +0.2, width 1.07; r = 18–20: −0.5);
+- p(z|m) weights use the intrinsic `true_r` (observed r is NaN after band dropout, and NaN
+  fell in the faintest bin: ESS 26k → 9k);
+- …and specifically the host magnitude `true_r − varagn_r`: COSMOS2020's p(z|m) describes
+  galaxies, and applied to host + AGN it left only 0.2% of bright (r < 21) AGN-dominated
+  training objects at z > 0.8 (now 15%), so real bright quasars at z = 1–3 were all placed at
+  z ≈ 0.1–0.2.
+
+Held-out photo-z, DDF, 80k candidates resampled to COSMOS p(z|m) (ESS ≈ 26k; single runs vary
+by ~±0.02 in NMAD at this size):
+
+| simulation settings | NMAD | outliers |
+|---|---|---|
+| mock library, no calibration offsets, z < 3 (earlier) | 0.020 | 9.9% |
+| real library, no offsets, no dropout, z < 4 | 0.044 | 20% |
+| + 1% calibration offsets | 0.048 | 21% |
+| + one-band dropout for 10% of objects | 0.068 | 24% |
+| + independent 10% per-band dropout (abandoned) | 0.116 | 29% |
+
+Defaults now: zp_sigma 0.01, one-band dropout for 5%.
+
+DP2's own photo-z against COSMOS2020 (103k extended objects, NMAD / outliers, all r < 25.5):
+BPZ 0.105/35%, DNF 0.091/33%, FlexZBoost 0.048/16%, GPz 0.124/35%, TPZ 0.065/22%, kNN
+0.005/13%. kNN (and likely the other trained estimators) must have COSMOS photo-z and CDF-S
+spec-z in its training set, so only BPZ (templates) is a fair comparison on these fields.
+
+First real-data run (a 25k-unique-object test model) on CDF-S X-ray sources (744 matched,
+583 spec-z): NMAD 0.140 / 38% outliers vs BPZ 0.102 / 38%; better than BPZ at r = 24–25.5,
+worse and overconfident at r < 21 (68% coverage 0.39). The bright outliers are luminous
+variable quasars (L_X 10^44–45, z = 0.8–2.8, placed at z ≈ 0.15: the galaxy p(z|m) applied to
+total magnitude, fixed above) and stars (z = 0; no star class); bright extended galaxies alone
+give NMAD 0.08 / 8% outliers. log L5100 vs L_X: Spearman 0.14.
+
+Next: production run (10^6 simulations per layer); a star class or star rejection; a realistic AGN prior
+(the training prior is 50% AGN, flat in log L5100 up to 10^46 erg/s; posteriors on L_AGN for
+non-variable galaxies inherit it); population priors applied by reweighting posterior samples.
 
 ## DIA-source calibration history (Oct 2026)
 

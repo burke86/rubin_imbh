@@ -64,12 +64,22 @@ class EmpiricalNzm:
 
 
 def observed_r_mag(df: pd.DataFrame) -> np.ndarray:
-    """r magnitude for the p(z | m) weights: the noise-free ``true_r`` of simulations (the
-    prior is on intrinsic properties, and the observed r is missing for band-dropout and
-    no-coverage objects; NaN would fall in the faintest bin), else the observed ``coadd_r``."""
-    col = "true_r" if "true_r" in df else "coadd_r"
+    """r magnitude for the p(z | m) weights.
+
+    For simulations, the noise-free host magnitude ``true_r - varagn_r``: COSMOS2020's p(z | m)
+    describes galaxies, so applying it to host + AGN would tell a bright z ~ 2 quasar that it
+    must be at low z (the AGN keeps its own luminosity prior); and the observed r is missing
+    for band-dropout and no-coverage objects (NaN would fall in the faintest bin). For real
+    tables, the observed ``coadd_r``.
+    """
+    if "true_r" in df:
+        f = df["true_r"].to_numpy(float)
+        if "varagn_r" in df:
+            f = f - np.nan_to_num(df["varagn_r"].to_numpy(float))
+    else:
+        f = df["coadd_r"].to_numpy(float)
     with np.errstate(divide="ignore", invalid="ignore"):
-        return 31.4 - 2.5 * np.log10(np.clip(df[col].to_numpy(float), 1e-3, None))
+        return 31.4 - 2.5 * np.log10(np.clip(f, 1e-3, None))
 
 
 def nzm_weights(df: pd.DataFrame, target: EmpiricalNzm, max_weight: float = 1.0e4) -> np.ndarray:
