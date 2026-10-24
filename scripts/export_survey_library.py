@@ -7,8 +7,10 @@ the coadd PSF flux and error, and the nightly epochs and nightly-mean difference
 errors after the pipeline's flag cuts (format in rubin_imbh/amortized/library.py). The
 training-set generator borrows noise and cadence from these rows.
 
-Default regions: the DP2 DDFs (layer "ddf") and WFD cones at several ecliptic latitudes,
-including the densely sampled ecliptic patch (layer "wfd"). Override with
+Regions: the DP2 DDFs (layer "ddf") plus WFD cones (layer "wfd"). With --depth-map (the
+depth_map.py parquet), WFD cones are centred on sky pixels of typical WFD depth (between the
+25th and 75th percentile of i-band m5), spread over ecliptic latitude; otherwise a fixed list
+is used. Regions without coverage are skipped. Override everything with
 --region NAME LAYER RA DEC (repeatable).
 """
 
@@ -52,8 +54,14 @@ def region_rows(catalog: str, name: str, layer: str, ra: float, dec: float, radi
     top += [c for b in BANDS for c in (f"{b}_psfFlux", f"{b}_psfFluxErr") if c in allc]
     fields = [cols.band, cols.flux_err, cols.time, *cols.flags]
     columns = [c for c in top if c in allc] + [f"{cols.lc}.{f}" for f in dict.fromkeys(fields)]
-    cat = lsdb.open_catalog(UPath(catalog), columns=columns,
-                            search_filter=lsdb.ConeSearch(ra=ra, dec=dec, radius_arcsec=radius))
+    try:
+        cat = lsdb.open_catalog(UPath(catalog), columns=columns,
+                                search_filter=lsdb.ConeSearch(ra=ra, dec=dec, radius_arcsec=radius))
+    except ValueError as err:
+        if "no coverage" not in str(err):
+            raise
+        logging.warning("%s: no coverage at (%.2f, %.2f); skipped", name, ra, dec)
+        return pd.DataFrame()
     nf = cat.query("refExtendedness >= 0").compute()
     if len(nf) == 0:
         logging.warning("%s: no Objects", name)
@@ -95,18 +103,49 @@ def region_rows(catalog: str, name: str, layer: str, ra: float, dec: float, radi
     return out
 
 
+def wfd_regions_from_depth_map(path, n_per_bin: int = 3, band: str = "i", seed: int = 0):
+    """WFD cone centres on pixels of typical depth, stratified by |ecliptic latitude|."""
+    import astropy.units as u
+    from astropy.coordinates import SkyCoord
+
+    px = pd.read_parquet(Path(path).expanduser())
+    ra_c = next(c for c in ("coord_ra", "ra") if c in px)
+    dec_c = next(c for c in ("coord_dec", "dec") if c in px)
+    m5 = px[f"m5_{band}"]
+    lo, hi = np.nanpercentile(m5, [25, 75])
+    px = px[(m5 >= lo) & (m5 <= hi)].copy()
+    c = SkyCoord(px[ra_c].to_numpy() * u.deg, px[dec_c].to_numpy() * u.deg)
+    px["ecl"] = np.abs(c.barycentrictrueecliptic.lat.deg)
+    px["gal_b"] = np.abs(c.galactic.b.deg)
+    px = px[px.gal_b >= 25]
+    rng = np.random.default_rng(seed)
+    out = []
+    for blo, bhi in ((0, 10), (10, 30), (30, 90)):
+        sel = px[(px.ecl >= blo) & (px.ecl < bhi)]
+        for _, r in sel.iloc[rng.choice(len(sel), min(n_per_bin, len(sel)), replace=False)].iterrows():
+            out.append((f"wfd_ecl{blo}-{bhi}_{r[ra_c]:.1f}_{r[dec_c]:.1f}", "wfd", float(r[ra_c]), float(r[dec_c])))
+    return out
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--catalog", default="/rubin/lsdb_data/dp2/object_collection")
     p.add_argument("--region", nargs=4, action="append", metavar=("NAME", "LAYER", "RA", "DEC"),
                    help="replace the default regions (repeatable)")
+    p.add_argument("--depth-map", help="depth_map.py parquet: choose WFD regions from typical-depth pixels")
     p.add_argument("--radius", type=float, default=600.0, help="cone radius per region (arcsec)")
     p.add_argument("--per-region", type=int, default=15000, help="Objects sampled per region")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", required=True)
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    regions = [(r[0], r[1], float(r[2]), float(r[3])) for r in args.region] if args.region else DEFAULT_REGIONS
+    if args.region:
+        regions = [(r[0], r[1], float(r[2]), float(r[3])) for r in args.region]
+    elif args.depth_map:
+        regions = [r for r in DEFAULT_REGIONS if r[1] == "ddf"] + wfd_regions_from_depth_map(args.depth_map, seed=args.seed)
+    else:
+        regions = DEFAULT_REGIONS
+    logging.info("regions: %s", [(r[0], r[1]) for r in regions])
     rng = np.random.default_rng(args.seed)
     parts = [region_rows(args.catalog, *r, args.radius, args.per_region, rng) for r in regions]
     lib = pd.concat([x for x in parts if len(x)], ignore_index=True)
