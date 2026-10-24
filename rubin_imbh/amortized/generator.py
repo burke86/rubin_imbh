@@ -40,6 +40,20 @@ class Priors:
     ebv_gal_sigma: float = 0.3          # half-normal
     ebv_agn_sigma: float = 0.5          # half-normal
     ebv_min: float = 1.0e-3
+    # jaxsedfit attenuates the AGN by E(B-V)_gal + E(B-V)_agn, so blue type-1 quasars need both
+    # screens thin; with independent broad priors almost no simulated AGN looked like a real
+    # quasar. This fraction of AGN is unobscured, with narrow half-normals for both screens.
+    agn_unobscured_fraction: float = 0.5
+    ebv_agn_unobscured_sigma: float = 0.03
+    ebv_gal_unobscured_sigma: float = 0.05
+    # AGN continuum and broad lines (passed to jaxsedfit instead of its defaults, which allow
+    # broad lines up to 20x the template): tuned to the colour-redshift relation of point-like
+    # Milliquas quasars in DP2 (broad strength 0.3-0.7 matches it to ~0.1 mag)
+    broad_lines_median: float = 0.5
+    broad_lines_sigma_ln: float = 0.3
+    pl_slope_mean: float = -2.1         # F_lambda ~ lambda^pl_slope (optical)
+    pl_slope_sigma: float = 0.3
+    pl_slope_range: tuple[float, float] = (-2.7, -1.0)  # jaxsedfit's allowed range
     agn_fraction: float = 0.5           # the rest have no AGN
     log_L5100_erg_range: tuple[float, float] = (40.0, 46.0)  # log-uniform, erg/s
     # the no-AGN half gets a negligible, continuous luminosity (normalizing flows handle a
@@ -57,15 +71,23 @@ class Priors:
     def draw(self, n: int, rng: np.random.Generator) -> dict[str, np.ndarray]:
         has_agn = rng.random(n) < self.agn_fraction
         log_L = np.where(has_agn, rng.uniform(*self.log_L5100_erg_range, n), rng.uniform(*self.no_agn_log_L5100_erg_range, n))
-        ebv_gal = np.maximum(np.abs(rng.normal(0, self.ebv_gal_sigma, n)), self.ebv_min)
-        ebv_agn = np.maximum(np.abs(rng.normal(0, self.ebv_agn_sigma, n)), self.ebv_min)
+        unobscured = has_agn & (rng.random(n) < self.agn_unobscured_fraction)
+        sig_gal = np.where(unobscured, self.ebv_gal_unobscured_sigma, self.ebv_gal_sigma)
+        sig_agn = np.where(unobscured, self.ebv_agn_unobscured_sigma, self.ebv_agn_sigma)
+        ebv_gal = np.maximum(np.abs(rng.normal(0, 1, n)) * sig_gal, self.ebv_min)
+        ebv_agn = np.maximum(np.abs(rng.normal(0, 1, n)) * sig_agn, self.ebv_min)
+        broad = self.broad_lines_median * np.exp(self.broad_lines_sigma_ln * rng.standard_normal(n))
+        pl_slope = np.clip(rng.normal(self.pl_slope_mean, self.pl_slope_sigma, n), *self.pl_slope_range)
         return {
             "redshift": rng.uniform(*self.z_range, n),
             "log_stellar_mass": rng.uniform(*self.log_mass_range, n),
             "log_ebv_gal": np.log(ebv_gal),
             "log_ebv_agn": np.log(ebv_agn),
             "log_agn_amp": np.log(10.0**log_L / W_TO_ERG_S),
+            "broad_lines_strength": broad,
+            "pl_slope": pl_slope,
             "_has_agn": has_agn,
+            "_unobscured": unobscured,
             "_log_L5100_erg": log_L,
         }
 
@@ -107,6 +129,7 @@ def simulate_population(n: int, priors: Priors, rng: np.random.Generator, config
         df = pd.DataFrame({key: v for key, v in res.params.items() if np.ndim(v) == 1})
         df["has_agn"] = p["_has_agn"]
         df["log_L5100_erg"] = p["_log_L5100_erg"]
+        df["agn_unobscured"] = p["_unobscured"]
         for j, b in enumerate(BANDS):
             df[f"true_{b}"] = res.fluxes[:, j] * MJY_TO_NJY
             df[f"varagn_{b}"] = res.components["variable_agn_fluxes"][:, j] * MJY_TO_NJY
