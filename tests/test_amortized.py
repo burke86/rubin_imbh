@@ -1,0 +1,93 @@
+"""Tests for the amortized-inference training-set pieces that do not need jaxsedfit."""
+
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from rubin_imbh.amortized.generator import ObserveConfig, Priors, observe  # noqa: E402
+from rubin_imbh.amortized.library import BANDS, match_library, mock_library  # noqa: E402
+from rubin_imbh.amortized.variability import drw_unit_batch, fvar_by_band  # noqa: E402
+
+
+def test_drw_batch_unit_variance_and_autocorrelation():
+    rng = np.random.default_rng(0)
+    n, L, tau = 20000, 6, 50.0
+    t = np.tile(np.array([0.0, 10.0, 30.0, 60.0, 100.0, 300.0]), (n, 1))
+    x = drw_unit_batch(t, np.full(n, tau), rng)
+    assert abs(x.var(axis=0) - 1).max() < 0.05
+    for k, dt in ((1, 10.0), (3, 60.0)):
+        r = np.corrcoef(x[:, 0], x[:, k])[0, 1]
+        assert abs(r - np.exp(-dt / tau)) < 0.03
+    # NaN padding is preserved and does not disturb the finite part
+    t2 = t.copy()
+    t2[:, 4:] = np.nan
+    x2 = drw_unit_batch(t2, np.full(n, tau), rng)
+    assert np.isnan(x2[:, 4:]).all() and np.isfinite(x2[:, :4]).all()
+
+
+def test_fvar_rises_to_the_blue():
+    f = fvar_by_band(np.array([0.1]), np.array([0.5]), np.array([[2550.0, 5100.0, 10200.0]]))
+    np.testing.assert_allclose(f[0], [0.1 * 2**0.5, 0.1, 0.1 * 2**-0.5])
+
+
+def test_match_library_picks_similar_brightness():
+    rng = np.random.default_rng(1)
+    lib = pd.concat([mock_library(4000, rng, "wfd"), mock_library(1000, rng, "ddf")], ignore_index=True)
+    target = 10 ** ((31.4 - np.array([19.0, 22.0, 25.0])) / 2.5)
+    idx = match_library(lib, np.repeat(target, 200), rng, layer="wfd", k=25)
+    assert (lib.layer.iloc[idx] == "wfd").all()
+    got = np.log10(lib.r_coadd_flux.to_numpy()[idx]).reshape(3, 200)
+    assert np.all(np.abs(np.median(got, axis=1) - np.log10(target)) < 0.1)
+
+
+def _sim(n, rng, varagn_njy):
+    rmag = rng.uniform(19.0, 23.0, n)
+    sim = pd.DataFrame({"redshift": rng.uniform(0.1, 1.0, n)})
+    for b in BANDS:
+        sim[f"true_{b}"] = 10 ** ((31.4 - rmag) / 2.5)
+        sim[f"varagn_{b}"] = varagn_njy
+    return sim
+
+
+def test_observe_null_without_agn_and_recovers_injected_rms():
+    rng = np.random.default_rng(2)
+    lib = mock_library(3000, rng, "ddf")
+    pri = Priors()
+    cfg = ObserveConfig(layer="ddf", sys_frac={})  # no floor: pure measurement noise
+    null = observe(_sim(1500, rng, 0.0), lib, pri, rng, cfg)
+    z = null["r_varSigClip"].dropna()
+    assert len(z) > 1000 and abs(z.mean()) < 0.15 and abs(z.std() - 1) < 0.15
+    assert (null["all_varSigClip"] > 5).mean() < 0.01
+    # coadd noise matches the borrowed errors
+    pull = (null["coadd_r"] - null["true_r"]) / null["coadd_err_r"]
+    assert abs(pull.std() - 1) < 0.08
+
+    strong = observe(_sim(1500, rng, 3.0e4), lib, pri, rng, cfg)  # large variable AGN flux
+    # A DRW observed over a baseline shorter than tau shows less than its asymptotic variance:
+    # E[S^2] = sigma^2 (1 - sum_{i != j} rho_ij / (n (n - 1))), rho_ij = exp(-|t_i - t_j| / tau_obs)
+    tau_obs = strong["tau_rest_days"].to_numpy() * (1 + strong["redshift"].to_numpy())
+    expected = np.empty(len(strong))
+    for i, (li, tau) in enumerate(zip(strong["lib_index"], tau_obs)):
+        t = np.asarray(lib["r_night_mjd"].iat[li])
+        n = len(t)
+        rho = np.exp(-np.abs(t[:, None] - t[None, :]) / tau)
+        expected[i] = strong["true_rms_r"].iat[i] ** 2 * (1 - (rho.sum() - n) / (n * (n - 1)))
+    rec = strong["r_xsAbs"].to_numpy()
+    ok = np.isfinite(rec) & (strong["r_nEpoch"] >= 20)
+    # E[S^2] is a statement about the mean (the DRW sample variance is right-skewed, so its
+    # median sits below the mean)
+    ratio = rec[ok].sum() / expected[ok].sum()
+    assert 0.9 < ratio < 1.1, ratio  # excess variance tracks the sampling-expected variance
+    assert (strong["r_varSigClip"] > 5).mean() > 0.8
+    for c in ("fvar0", "fvar_alpha", "tau_rest_days", "lib_index", "all_dof"):
+        assert c in strong
+
+
+if __name__ == "__main__":
+    for name, fn in list(globals().items()):
+        if name.startswith("test_"):
+            fn()
+            print(f"{name}: ok")
