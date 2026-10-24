@@ -377,9 +377,35 @@ too red in u−g (by 0.2–0.9) and have far too much colour structure with reds
 AGN SED prior. Fix before running the full variable sample: AGN SED priors tuned to match
 the SDSS quasar colour–redshift relation, then re-simulate.
 
-Next: AGN SED prior (dust, line strengths, continuum slope) checked against real quasar
-colours; re-simulate and retrain; Milliquas validation; then `scripts/infer.py` on the full
-variable sample.
+AGN priors retuned to real quasar colours (in jaxpz): half of AGN unobscured (both dust
+screens thin, since jaxsedfit attenuates the AGN by E(B−V)_gal + E(B−V)_agn), broad lines
+log-normal around 0.5× the template (jaxsedfit's default allows 20×), pl_slope ~ N(−2.1, 0.3).
+Unobscured simulated quasars then match the median colours of point-like Milliquas quasars to
+0.10 mag rms (was 0.60). jaxsedfit already applies IGM absorption (CIGALE v2025.1 port) to all
+components.
+
+`npe_v3` (10^6 new simulations per layer, zp 3%, patience 10, lr 1e-3; 163 epochs, 38 min):
+COSMOS 0.102 / 30% (68% coverage 0.64–0.71), CDF-S 0.093 / 31% (BPZ 0.100 / 37%). Milliquas
+variable quasars: NMAD 0.37, 64% outliers, but the bias is gone (−0.03, was −0.28) and 68%
+coverage is 0.63–0.83. The posteriors are broad and multi-peaked (median 26% of the mass
+within 0.15(1+z) of the truth; the mode is no better than the median), and the errors are
+systematic in z: low-z Seyferts pushed up (z < 0.5: predicted 0.51), z = 1.5–2.5 quasars
+pulled down to ~1. Likely cause: an AGN's redshift prior comes from the galaxy p(z | host m),
+and a z ~ 2 quasar's faint host (r ~ 25) sits where galaxies are at z ~ 1; real quasars follow
+the quasar luminosity function, peaking at z ~ 1.5–2.5.
+
+`npe_v3b` (same simulations, `jaxpz train --specz-input --agn-fraction`; stopped at 54
+epochs): with spec-z given, z is recovered (NMAD 0.001) and on CDF-S the L5100 posterior tracks
+L_X better (Spearman 0.41 vs 0.28 in photo-z mode; variable X-ray AGN median
+log(L5100/L_X) = +0.62). Its photo-z mode is worse than v3 (COSMOS 0.174 / 42%), so the extra
+input costs accuracy at this training length; the AGN fraction is poorly constrained (logit
+scatter 2.6, 68% coverage 0.47 with z known). Population prior, CDF-S, mean
+P(λ_Edd > 0.01): not X-ray AGN 0.03, X-ray AGN 0.10, variable X-ray AGN 0.97–0.98.
+
+Next: a quasar-luminosity-function prior for AGN-dominated objects (reweighting test, then
+training-set resampling in jaxpz); longer training / a larger flow for the spec-z-input
+model; DP2 BPZ/FlexZBoost on the Milliquas objects for a fair quasar benchmark; then
+`jaxpz predict` on the full variable sample.
 
 ## DIA-source calibration history (Oct 2026)
 
