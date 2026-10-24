@@ -296,9 +296,37 @@ variable quasars (L_X 10^44–45, z = 0.8–2.8, placed at z ≈ 0.15: the galax
 total magnitude, fixed above) and stars (z = 0; no star class); bright extended galaxies alone
 give NMAD 0.08 / 8% outliers. log L5100 vs L_X: Spearman 0.14.
 
-Next: production run (10^6 simulations per layer); a star class or star rejection; a realistic AGN prior
-(the training prior is 50% AGN, flat in log L5100 up to 10^46 erg/s; posteriors on L_AGN for
-non-variable galaxies inherit it); population priors applied by reweighting posterior samples.
+Production model `npe_v1` (Oct 24, 2026; saved to `models/npe_v1`, gitignored): 10^6
+simulations per layer (27 min each on the laptop CPU), host-magnitude p(z|m) resampling (ESS
+657k), 1.3M training rows, 123 epochs in 1.9 h. Held-out simulations (DDF + WFD): photo-z
+NMAD 0.046 / 24% outliers, calibrated (68/95% coverage 0.68/0.95); variable objects: NMAD
+0.021 / 11%, log L5100 scatter 0.23 dex; log M* scatter 0.38 dex.
+
+Real data, photo-z NMAD / outliers by r (cModel), ours vs DP2 BPZ (the fair, template-based
+comparison; the trained DP2 estimators evidently saw these fields' reference redshifts):
+
+| | r < 21 | 21–22 | 22–23 | 23–24 | 24–25.5 | all |
+|---|---|---|---|---|---|---|
+| COSMOS vs COSMOS2020 (103k extended): ours | 0.034/1% | 0.036/2% | 0.037/5% | 0.056/17% | 0.134/37% | 0.093/30% |
+| BPZ | 0.026/1% | 0.027/2% | 0.030/7% | 0.060/26% | 0.176/44% | 0.111/36% |
+| FlexZBoost | 0.013/1% | 0.015/1% | 0.019/2% | 0.030/7% | 0.072/22% | 0.050/18% |
+| CDF-S X-ray sources (744): ours | 0.042/12% | 0.044/6% | 0.046/9% | 0.085/36% | 0.210/56% | 0.094/32% |
+| BPZ | 0.035/15% | 0.025/9% | 0.034/13% | 0.098/42% | 0.255/59% | 0.102/38% |
+
+CDF-S spec-z subset (583): ours 0.073 / 25% outliers, BPZ 0.063 / 30%, FlexZBoost 0.039 / 23%.
+So: better than BPZ at r > 23 and in outlier rate, slightly worse NMAD at r < 23, behind the
+trained estimators. Real-data 68% coverage is 0.43–0.63 (overconfident, worst when bright),
+so a sim-to-real gap remains in the bright-galaxy colours. Bright z > 0.7 quasars now get
+broad, often bimodal redshift posteriors that cover the truth for some, with medians still low;
+their L5100 posteriors (10^43–45) track L_X. Variable X-ray AGN (22): median log(L5100/L_X)
+= +0.14, scatter 0.49 dex; non-variable X-ray AGN get low, broad L5100 (median −2.9 dex
+relative to L_X, 68% width 5.9 dex): without variability the photometry hardly constrains
+L_AGN, and the 50%-AGN, flat-in-log-L prior dominates.
+
+Next: close the bright-end sim-to-real gap (cModel colour systematics, emission lines/SED
+library breadth; check per-band colour residuals of bright galaxies with secure spec-z); a
+star class or star rejection; a realistic AGN prior (reweighting, no new simulations); WFD
+validation (e.g. Milliquas quasars); then run on the full variable sample.
 
 ## DIA-source calibration history (Oct 2026)
 

@@ -4,3 +4,4 @@ __pycache__/
 dask-worker-space/
 *.parquet
 dp2_variables/
+models/
