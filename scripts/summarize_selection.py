@@ -1,6 +1,7 @@
 """Combine a tiled selection run and summarize it.
 
     python scripts/summarize_selection.py ~/dp2_variables_v2 --out ~/dp2_variables_v2_all
+    python scripts/summarize_selection.py ~/dp2_variables_v2_gaia.parquet --out ~/dp2_clean   # after gaia_flag.py
 
 Writes ``<out>.parquet`` (all selected objects, with tile, Galactic and ecliptic latitude
 columns) and ``<out>.png`` (sky density and per-tile breakdowns), and prints counts by tile,
@@ -19,28 +20,40 @@ import pandas as pd
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("run_dir", help="tiled output directory (contains o<order>_p<pixel>/stats.parquet)")
+    p.add_argument("run_dir", help="tiled output directory (o<order>_p<pixel>/stats.parquet), or a combined parquet")
     p.add_argument("--out", required=True, help="output prefix (.parquet and .png are added)")
     p.add_argument("--include-vetoed", action="store_true",
                    help="also summarize objects failing envClean (bright stars and their surroundings)")
+    p.add_argument("--keep-gaia-stars", action="store_true",
+                   help="keep objects flagged gaia_star by gaia_flag.py (dropped by default when present)")
     args = p.parse_args(argv)
     pd.set_option("display.width", 200)
 
     run = Path(args.run_dir).expanduser()
-    files = sorted(glob.glob(str(run / "o*_p*" / "stats.parquet")))
-    done = sorted(glob.glob(str(run / "o*_p*" / "_DONE")))
-    parts = []
-    for f in files:
-        d = pd.read_parquet(f)
-        d["tile"] = Path(f).parent.name
-        parts.append(d)
-    d = pd.concat(parts, ignore_index=True)
-    print(f"{len(done)} finished tiles, {len(files)} with selected objects; {len(d)} rows, "
-          f"{d.objectId.nunique()} unique objectId")
+    if run.is_file():
+        d = pd.read_parquet(run)
+        print(f"{run.name}: {len(d)} rows, {d.objectId.nunique()} unique objectId")
+    else:
+        files = sorted(glob.glob(str(run / "o*_p*" / "stats.parquet")))
+        done = sorted(glob.glob(str(run / "o*_p*" / "_DONE")))
+        if not files:
+            raise SystemExit(f"no o*_p*/stats.parquet under {run}")
+        parts = []
+        for f in files:
+            t = pd.read_parquet(f)
+            t["tile"] = Path(f).parent.name
+            parts.append(t)
+        d = pd.concat(parts, ignore_index=True)
+        print(f"{len(done)} finished tiles, {len(files)} with selected objects; {len(d)} rows, "
+              f"{d.objectId.nunique()} unique objectId")
     if "envClean" in d and not args.include_vetoed:
         n0 = len(d)
         d = d[d["envClean"].astype(bool)].reset_index(drop=True)
         print(f"envClean only (no r<18 star within the veto radius, not a bright star itself): {len(d)} of {n0}")
+    if "gaia_star" in d and not args.keep_gaia_stars:
+        n0 = len(d)
+        d = d[~d["gaia_star"].astype(bool)].reset_index(drop=True)
+        print(f"Gaia stars dropped (parallax/PM > 5 sigma, not quasar candidates): {len(d)} of {n0} remain")
 
     import astropy.units as u
     from astropy.coordinates import SkyCoord
