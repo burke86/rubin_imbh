@@ -34,6 +34,7 @@ from pathlib import Path
 
 import hats
 import lsdb
+import numpy as np
 import pandas as pd
 from upath import UPath
 
@@ -226,6 +227,13 @@ def load_environment(args, out: Path, object_catalog: str):
         cache.parent.mkdir(parents=True, exist_ok=True)
         stars.to_parquet(cache)
         logging.info("cached %d bright stars to %s", len(stars), cache)
+    if args.cone:  # an all-sky cache would otherwise ship every star to the workers
+        ra0, dec0 = np.radians(args.cone[0]), np.radians(args.cone[1])
+        ra, dec = np.radians(stars[oc.ra].to_numpy(float)), np.radians(stars[oc.dec].to_numpy(float))
+        cos_sep = np.sin(dec0) * np.sin(dec) + np.cos(dec0) * np.cos(dec) * np.cos(ra - ra0)
+        pad = np.radians((args.cone[2] + 2 * args.veto_arcsec) / 3600)
+        stars = stars[cos_sep >= np.cos(pad)]
+        logging.info("%d bright stars within the cone", len(stars))
     bright = bright_star_catalog(stars, oc, margin_arcsec=args.veto_arcsec + 5.0)
     return dict(objects=objects, oc=oc, bright=bright)
 
