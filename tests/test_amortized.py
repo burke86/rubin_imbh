@@ -158,8 +158,9 @@ def test_real_observables_match_training_features_and_reference_matching():
     rng = np.random.default_rng(9)
     lib = mock_library(500, rng, "ddf")
     sim = observe(_sim(300, rng, 1e4), lib, Priors(), rng, ObserveConfig(layer="ddf"))
-    st = pd.DataFrame({"objectId": np.arange(300), "coord_ra": rng.uniform(150, 150.2, 300),
-                       "coord_dec": rng.uniform(2, 2.2, 300), "envClean": True})
+    # spread over 2 x 2 deg so unmatched objects have a negligible chance of a 1" coincidence
+    st = pd.DataFrame({"objectId": np.arange(300), "coord_ra": rng.uniform(149, 151, 300),
+                       "coord_dec": rng.uniform(1, 3, 300), "envClean": True})
     for b in BANDS:
         st[f"{b}_cModelFlux"], st[f"{b}_cModelFluxErr"] = sim[f"coadd_{b}"], sim[f"coadd_err_{b}"]
     for b in "griz":
