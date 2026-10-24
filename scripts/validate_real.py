@@ -65,7 +65,7 @@ def main(argv=None):
     args = p.parse_args(argv)
     pd.set_option("display.width", 200)
 
-    from rubin_imbh.amortized.npe import NPE
+    from rubin_imbh.amortized.npe import NPE, summarize_posteriors
 
     stats = pd.read_parquet(Path(args.stats).expanduser())
     if "envClean" in stats:
@@ -95,22 +95,7 @@ def main(argv=None):
     if len(obs) == 0:
         raise SystemExit("no matches")
 
-    npe = NPE.load(args.npe)
-    s = npe.sample(obs, args.n_samples)
-    th = list(npe.spec.theta)
-    for j, name in enumerate(th):
-        obs[f"post_{name}_med"] = np.median(s[:, :, j], axis=1)
-        obs[f"post_{name}_lo"], obs[f"post_{name}_hi"] = np.percentile(s[:, :, j], [16, 84], axis=1)
-    if "log_L5100_erg" in th:
-        # the same posteriors under a population AGN prior (Eddington-ratio distribution), by
-        # importance reweighting: columns pop_<theta>_{med,lo,hi}, p_agn_{train,pop} = P(lambda_Edd > 0.01)
-        from rubin_imbh.amortized.agn_prior import EddingtonRatioPrior, reweight, weighted_quantiles
-
-        w, ess = reweight(s, th)
-        for j, name in enumerate(th):
-            obs[f"pop_{name}_lo"], obs[f"pop_{name}_med"], obs[f"pop_{name}_hi"] = weighted_quantiles(s[:, :, j], w, (0.16, 0.5, 0.84))
-        agn = EddingtonRatioPrior().log_lam(s[:, :, th.index("log_L5100_erg")], s[:, :, th.index("log_stellar_mass")]) > -2.0
-        obs["p_agn_train"], obs["p_agn_pop"], obs["pop_ess"] = agn.mean(axis=1), (w * agn).sum(axis=1), ess
+    obs = summarize_posteriors(NPE.load(args.npe), obs, args.n_samples)
     if args.photoz:
         pz = pd.read_parquet(Path(args.photoz).expanduser())
         pz_cols = (args.photoz_column.split(",") if args.photoz_column

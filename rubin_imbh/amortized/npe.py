@@ -190,3 +190,32 @@ def evaluate(npe: NPE, df: pd.DataFrame, n_samples: int = 300, seed: int = 1) ->
             r["outlier"] = float(np.mean(np.abs(dz) > 0.15))
         rows[name] = r
     return pd.DataFrame(rows).T
+
+
+def summarize_posteriors(npe: "NPE", obs: pd.DataFrame, n_samples: int = 100, chunk: int = 20000,
+                         seed: int = 0) -> pd.DataFrame:
+    """Posterior summaries for every row of ``obs`` (``real_observables`` output), in chunks.
+
+    Adds ``post_<theta>_{med,lo,hi}`` (median, 16th, 84th percentile) under the training prior;
+    with ``log_L5100_erg`` among the parameters also ``pop_<theta>_{med,lo,hi}`` under the
+    population AGN prior (``agn_prior``, importance reweighting), ``p_agn_train`` / ``p_agn_pop``
+    = P(lambda_Edd > 0.01) and ``pop_ess`` (effective number of reweighted samples).
+    """
+    from .agn_prior import EddingtonRatioPrior, reweight, weighted_quantiles
+
+    th = list(npe.spec.theta)
+    parts = []
+    for a in range(0, len(obs), chunk):
+        o = obs.iloc[a : a + chunk].copy()
+        s = npe.sample(o, n_samples, seed=seed + a)
+        for j, name in enumerate(th):
+            o[f"post_{name}_med"] = np.median(s[:, :, j], axis=1)
+            o[f"post_{name}_lo"], o[f"post_{name}_hi"] = np.percentile(s[:, :, j], [16, 84], axis=1)
+        if "log_L5100_erg" in th:
+            w, ess = reweight(s, th)
+            for j, name in enumerate(th):
+                o[f"pop_{name}_lo"], o[f"pop_{name}_med"], o[f"pop_{name}_hi"] = weighted_quantiles(s[:, :, j], w, (0.16, 0.5, 0.84))
+            agn = EddingtonRatioPrior().log_lam(s[:, :, th.index("log_L5100_erg")], s[:, :, th.index("log_stellar_mass")]) > -2.0
+            o["p_agn_train"], o["p_agn_pop"], o["pop_ess"] = agn.mean(axis=1), (w * agn).sum(axis=1), ess
+        parts.append(o)
+    return pd.concat(parts) if parts else obs
