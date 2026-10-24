@@ -28,12 +28,12 @@ def cdfs_xray_reference() -> pd.DataFrame:
     """CDF-S 7 Ms sources (Luo et al. 2017): adopted redshift (spec-z where available), L_X, class."""
     from astroquery.vizier import Vizier
 
-    cols = ["_RAJ2000", "_DEJ2000", "zF", "r_zF", "zspec", "q_zspec", "LXc", "OType"]
+    cols = ["RAJ2000", "DEJ2000", "zF", "r_zF", "zspec", "q_zspec", "LXc", "OType"]
     t = Vizier(columns=cols, row_limit=-1).get_catalogs("J/ApJS/228/2/sources")[0].to_pandas()
     is_spec = t["r_zF"].astype(str).str.strip().str.lower().str.startswith("zspec")
     with np.errstate(divide="ignore", invalid="ignore"):
         log_lx = np.log10(t["LXc"].to_numpy(float))
-    return pd.DataFrame({"ra": t["_RAJ2000"].to_numpy(float), "dec": t["_DEJ2000"].to_numpy(float),
+    return pd.DataFrame({"ra": t["RAJ2000"].to_numpy(float), "dec": t["DEJ2000"].to_numpy(float),
                          "z_ref": t["zF"].to_numpy(float), "z_type": np.where(is_spec, "spec", "photo"),
                          "logLX": log_lx, "is_xray_agn": t["OType"].astype(str).str.strip().eq("AGN").to_numpy()})
 
