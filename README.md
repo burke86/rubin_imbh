@@ -353,9 +353,26 @@ z = 0 and ≈ 5% at z = 1, applied by importance reweighting of the posterior sa
 mean P(λ_Edd > 0.01), training → population prior: galaxies that are not X-ray AGN
 0.18 → 0.04, X-ray AGN 0.35 → 0.10, variable X-ray AGN 0.99 → 0.91.
 
-Next: train v2 longer (patience 10, lr 1e-3; ~30 min) or try zp_sigma = 0.02; WFD and
-quasar validation via the clean variable sample (`scripts/attach_object_columns.py` on the
-RSP, then `validate_real.py --reference milliquas`); then run on the full variable sample.
+Clean variable sample with cModel (`attach_object_columns.py` on the RSP: 731,886 of
+731,886 matched by objectId; coadd coverage u 68%, g 87%, r 82%, i 85%, z 85%, y 83% —
+patchier than the 13-region library, where i is missing for only ~2%).
+
+Quasar check (`validate_real.py --reference milliquas`, npe_v2): 7,786 variable objects with
+Milliquas spectroscopic redshifts: NMAD 0.29, 65% outliers, bias −0.28; by redshift, outliers
+27% at z < 0.5, 64% at z = 1–1.5, ≥ 94% at z > 1.5, with predicted medians stuck at
+z ≈ 0.7. Cause: simulated AGN-dominated objects look nothing like real quasars. Median
+colours, real point-like Milliquas quasars vs simulated AGN-dominated (r < 22.5):
+u−g 0.1–0.7 vs 0.7–1.8, g−r 0.1–0.3 vs 0.4–1.3. The AGN dust prior (half-normal σ = 0.5,
+median E(B−V) = 0.32) reddens most simulated AGN, but even simulated AGN with E(B−V) < 0.05 are
+too red in u−g (by 0.2–0.9) and have far too much colour structure with redshift
+(g−r = +0.93 at z = 1–1.5, r−i = +0.81 at z = 1.5–2, i−z = +0.70 at z = 2–2.5; real quasars vary by
+0.1–0.3), which points to over-strong emission lines / FeII and a too-red continuum in the
+AGN SED prior. Fix before running the full variable sample: AGN SED priors tuned to match
+the SDSS quasar colour–redshift relation, then re-simulate.
+
+Next: AGN SED prior (dust, line strengths, continuum slope) checked against real quasar
+colours; re-simulate and retrain; Milliquas validation; then `scripts/infer.py` on the full
+variable sample.
 
 ## DIA-source calibration history (Oct 2026)
 
