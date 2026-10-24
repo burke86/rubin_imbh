@@ -32,6 +32,7 @@ CC-IN2P3), so the pipeline runs there; it is tested locally on mock catalogs.
 - `scripts/export_survey_library.py` — DP2 noise/cadence library for the simulator (RSP)
 - `scripts/make_training_set.py` — amortized-inference training set (priors → jaxsedfit → DP2 observables)
 - `scripts/train_flow.py` — train/evaluate the neural posterior estimator (`rubin_imbh/amortized/npe.py`)
+- `scripts/fetch_cosmos2020_nzm.py` — COSMOS2020 photo-z vs r for the empirical p(z|m) prior (`rubin_imbh/amortized/nz_prior.py`)
 - `scripts/depth_map.py` — coadd 5σ depth per HEALPix pixel from object_collection; finds DP2's depth layers
 - `scripts/simulate_clip_null.py` — regenerates the null table for `varSigClip`
 - `tests/test_pipeline.py` — mock-data tests (`python tests/test_pipeline.py`)
@@ -210,8 +211,27 @@ scatter 0.5 dex. For variable objects, variability inputs vs photometry-only (ab
 coverage 0.67/0.94 vs 0.50/0.89. The variability model was still improving at epoch 60, so
 all-object comparisons are not yet fair.
 
-Next: real survey library (RSP export); ~10^6 simulations and longer training; photo-z
-improvements (population priors applied by reweighting posterior samples, p_pop(θ)/p_train(θ), so they can change without retraining);
+Empirical magnitude–redshift prior (`rubin_imbh/amortized/nz_prior.py`,
+`scripts/fetch_cosmos2020_nzm.py`, `train_flow.py --nzm`): p(z | r) from COSMOS2020 CLASSIC
+(LePhare `lp_zbest` vs HSC r auto; 711,918 clean-area galaxies, 237,751 at r < 25.5, 5.1% of
+those at z > 3, beyond the current 0–3 training range), applied by resampling the training set
+with w = p_COSMOS(z|m) / p_train(z|m) (conditional only; training magnitudes kept). Mock DDF
+pool, 50k training each, same realistic held-out set (6k, COSMOS-like p(z|m)), trained to
+convergence:
+
+| | broad prior | COSMOS p(z\|m) |
+|---|---|---|
+| photo-z NMAD | 0.076 | 0.020 |
+| outliers (\|Δz\|/(1+z) > 0.15) | 25% | 9.9% |
+| log M* scatter | 0.47 dex | 0.24 dex |
+| z coverage 68/95% | 0.66/0.94 | 0.66/0.92 |
+
+Calibration slips slightly with resampling (duplicated objects; some parameters at 0.88–0.92
+for 95%); more simulations should fix it. That run capped weights at 50× the median, which
+under-corrects bright magnitudes; the cap is now 10⁴.
+
+Next: real survey library (RSP export); ~10^6 simulations and longer training; extend the
+redshift range beyond 3; photo-z improvements (population priors applied by reweighting posterior samples, p_pop(θ)/p_train(θ), so they can change without retraining);
 validation on CDF-S.
 
 ## DIA-source calibration history (Oct 2026)

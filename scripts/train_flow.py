@@ -33,6 +33,8 @@ def main(argv=None):
     p.add_argument("--layers", type=int, default=FlowSpec.flow_layers)
     p.add_argument("--width", type=int, default=FlowSpec.nn_width)
     p.add_argument("--no-variability", action="store_true", help="photometry-only inputs (ablation)")
+    p.add_argument("--nzm", help="empirical p(z|m) catalogue (fetch_cosmos2020_nzm.py output): resample the "
+                   "training and held-out sets to it before training")
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args(argv)
     pd.set_option("display.width", 200)
@@ -41,6 +43,13 @@ def main(argv=None):
     rng = np.random.default_rng(args.seed)
     test = rng.random(len(d)) < args.test_frac
     train_df, test_df = d[~test].reset_index(drop=True), d[test].reset_index(drop=True)
+    if args.nzm:
+        from rubin_imbh.amortized.nz_prior import EmpiricalNzm, resample_to_nzm
+
+        nzm = EmpiricalNzm.from_cosmos2020(args.nzm)
+        train_df, ess = resample_to_nzm(train_df, nzm, len(train_df), rng)
+        test_df, ess_t = resample_to_nzm(test_df, nzm, len(test_df), rng)
+        print(f"resampled to empirical p(z|m): effective sample size {ess:.0f} (training), {ess_t:.0f} (held-out)")
     print(f"{len(train_df)} training, {len(test_df)} held-out simulations")
 
     t0 = time.time()

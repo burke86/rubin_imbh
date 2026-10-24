@@ -116,6 +116,28 @@ def test_npe_flow_is_calibrated_on_a_toy_problem():
     assert np.all(np.abs(np.median(s, axis=1) - true).mean(axis=0) < 0.3)
 
 
+def test_empirical_nzm_resampling_matches_target():
+    """Resampling a training set to an empirical p(z | m) reproduces its median z per magnitude."""
+    from rubin_imbh.amortized.nz_prior import EmpiricalNzm, observed_r_mag, resample_to_nzm
+
+    rng = np.random.default_rng(5)
+    # target: median redshift rises with magnitude
+    m_t = rng.uniform(18, 25.5, 200000)
+    z_t = np.clip(rng.gamma(4.0, (0.05 + 0.08 * (m_t - 18)) / 4.0), 0, 2.99)
+    target = EmpiricalNzm.from_catalog(z_t, m_t, m_range=(18.0, 25.5), z_range=(0.0, 3.0))
+    # training set: uniform redshift, independent of magnitude
+    n = 60000
+    m = rng.uniform(18, 25.5, n)
+    df = pd.DataFrame({"redshift": rng.uniform(0.0, 3.0, n), "coadd_r": 10 ** ((31.4 - m) / 2.5)})
+    out, ess = resample_to_nzm(df, target, 30000, rng)
+    assert 1000 < ess < n
+    mo = observed_r_mag(out)
+    for lo, hi in ((19, 20), (22, 23), (24, 25)):
+        want = np.median(z_t[(m_t > lo) & (m_t < hi)])
+        got = np.median(out.redshift[(mo > lo) & (mo < hi)])
+        assert abs(got - want) < 0.05 + 0.05 * want, (lo, got, want)
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
