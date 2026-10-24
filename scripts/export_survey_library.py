@@ -3,7 +3,7 @@
     python scripts/export_survey_library.py --out ~/survey_library.parquet
 
 For each region (a cone with a layer label), samples random Objects and writes, per band:
-the coadd PSF flux and error, and the nightly epochs and nightly-mean difference-flux
+the coadd flux and error (cModel by default; --flux-template), and the nightly epochs and nightly-mean difference-flux
 errors after the pipeline's flag cuts (format in rubin_imbh/amortized/library.py). The
 training-set generator borrows noise and cadence from these rows.
 
@@ -45,13 +45,14 @@ DEFAULT_REGIONS = [
 
 
 def region_rows(catalog: str, name: str, layer: str, ra: float, dec: float, radius: float, n: int,
-                rng: np.random.Generator) -> pd.DataFrame:
+                rng: np.random.Generator, flux_template: str = "{b}_cModelFlux") -> pd.DataFrame:
     full = lsdb.open_catalog(UPath(catalog))
     cols = resolve_columns(full, OBJECT)
     allc = list(getattr(full, "all_columns", full.columns))
     info = full.hc_structure.catalog_info
     top = [cols.obj_id, info.ra_column, info.dec_column, "refExtendedness"]
-    top += [c for b in BANDS for c in (f"{b}_psfFlux", f"{b}_psfFluxErr") if c in allc]
+    flux_cols = {b: (flux_template.format(b=b), flux_template.format(b=b) + "Err") for b in BANDS}
+    top += [c for b in BANDS for c in flux_cols[b] if c in allc]
     fields = [cols.band, cols.flux_err, cols.time, *cols.flags]
     columns = [c for c in top if c in allc] + [f"{cols.lc}.{f}" for f in dict.fromkeys(fields)]
     try:
@@ -88,8 +89,9 @@ def region_rows(catalog: str, name: str, layer: str, ra: float, dec: float, radi
         "refExtendedness": nf["refExtendedness"].to_numpy(),
     })
     for b in BANDS:
-        out[f"{b}_coadd_flux"] = nf[f"{b}_psfFlux"].to_numpy(float) if f"{b}_psfFlux" in nf else np.nan
-        out[f"{b}_coadd_err"] = nf[f"{b}_psfFluxErr"].to_numpy(float) if f"{b}_psfFluxErr" in nf else np.nan
+        fc, ec = flux_cols[b]
+        out[f"{b}_coadd_flux"] = nf[fc].to_numpy(float) if fc in nf else np.nan
+        out[f"{b}_coadd_err"] = nf[ec].to_numpy(float) if ec in nf else np.nan
         nb = nights[nights.band == b]
         g = nb.groupby("obj")
         t_lists = g["t"].apply(lambda x: x.to_numpy()).reindex(range(len(nf)))
@@ -135,6 +137,8 @@ def main(argv=None):
     p.add_argument("--depth-map", help="depth_map.py parquet: choose WFD regions from typical-depth pixels")
     p.add_argument("--radius", type=float, default=600.0, help="cone radius per region (arcsec)")
     p.add_argument("--per-region", type=int, default=15000, help="Objects sampled per region")
+    p.add_argument("--flux-template", default="{b}_cModelFlux",
+                   help="coadd flux column (error = <name>Err); must match what validate_real.py feeds the model")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", required=True)
     args = p.parse_args(argv)
@@ -147,7 +151,7 @@ def main(argv=None):
         regions = DEFAULT_REGIONS
     logging.info("regions: %s", [(r[0], r[1]) for r in regions])
     rng = np.random.default_rng(args.seed)
-    parts = [region_rows(args.catalog, *r, args.radius, args.per_region, rng) for r in regions]
+    parts = [region_rows(args.catalog, *r, args.radius, args.per_region, rng, args.flux_template) for r in regions]
     lib = pd.concat([x for x in parts if len(x)], ignore_index=True)
     lib.to_parquet(Path(args.out).expanduser())
     print(f"wrote {len(lib)} library rows ({lib.groupby('layer').size().to_dict()}) to {args.out}")
