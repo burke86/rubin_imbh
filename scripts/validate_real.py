@@ -106,6 +106,7 @@ def main(argv=None):
         obs["z_spec"] = np.where(spec, obs["ref_z_ref"].to_numpy(float), np.nan)
         print(f"conditioning on the spectroscopic redshift of {spec.sum()} of {len(obs)} objects")
     obs = summarize_posteriors(npe, obs, args.n_samples)
+    th = list(npe.spec.theta)
     if args.photoz:
         pz = pd.read_parquet(Path(args.photoz).expanduser())
         pz_cols = (args.photoz_column.split(",") if args.photoz_column
