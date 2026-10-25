@@ -7,7 +7,8 @@
 
 ``--stats``: a ``select_variables.py run --no-select --stats-only`` output for the field, run
 with the simulator's floor (``--sys-frac r=0.0075,i=0.0075,z=0.0075``) and keeping the coadd
-flux and error columns (``--keep-columns``). ``--reference``: ``cosmos2020`` (COSMOS2020 photo-z)
+flux and error columns (``--keep-columns``). ``--reference``: ``cosmos2020`` (COSMOS2020 photo-z), ``cosmos-specz`` (COSMOS spectroscopic
+compilation, Khostovan et al. 2026)
 ``cdfs-xray`` (CDF-S 7 Ms sources, spec-z where available, with L_X) or ``milliquas``
 (spectroscopic quasars/AGN anywhere, e.g. for the WFD variable sample). ``--photoz``: optional
 table with ``objectId`` and DP2 photo-z columns (export_photoz.py); every
@@ -30,7 +31,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from jaxpz.observables import real_observables  # noqa: E402
 from rubin_imbh.references import (  # noqa: E402
-    cdfs_xray_reference, cosmos2020_reference, match_reference, milliquas_reference)
+    cdfs_xray_reference, cosmos2020_reference, cosmos_specz_reference, match_reference, milliquas_reference)
 
 MAG_BINS = [-np.inf, 21, 22, 23, 24, 25.5]
 
@@ -51,8 +52,10 @@ def main(argv=None):
     p.add_argument("--flux-template", default="{b}_psfFlux")
     p.add_argument("--err-template", default="{b}_psfFluxErr")
     p.add_argument("--reference", required=True,
-                   help="cosmos2020, cdfs-xray, milliquas (spectroscopic quasars/AGN), or a parquet file with ra, dec, z_ref, z_type (and optionally logLX, is_xray_agn)")
+                   help="cosmos2020 (photo-z), cosmos-specz (spectroscopic compilation), cdfs-xray, milliquas (spectroscopic quasars/AGN), or a parquet file with ra, dec, z_ref, z_type (and optionally logLX, is_xray_agn)")
     p.add_argument("--cosmos2020", default="data/cosmos2020_classic_zr.parquet")
+    p.add_argument("--cosmos-specz", default="data/cosmos_specz_DR1.1_unique.fits",
+                   help="COSMOS spectroscopic redshift compilation (DR1.1 unique file) for --reference cosmos-specz")
     p.add_argument("--photoz", help="table with objectId and DP2 photo-z column(s)")
     p.add_argument("--photoz-column", help="photo-z column(s) in --photoz, comma-separated "
                    "(default: every *_z_median column, e.g. bpz, dnf, fzboost, gpz, knn, tpz)")
@@ -84,6 +87,8 @@ def main(argv=None):
     obs = real_observables(stats, args.flux_template, args.err_template)
     if args.reference == "cosmos2020":
         ref = cosmos2020_reference(args.cosmos2020)
+    elif args.reference == "cosmos-specz":
+        ref = cosmos_specz_reference(args.cosmos_specz)
     elif args.reference == "cdfs-xray":
         ref = cdfs_xray_reference()
     elif args.reference == "milliquas":

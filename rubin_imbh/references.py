@@ -24,6 +24,24 @@ def cosmos2020_reference(path, r_max: float = 25.5) -> pd.DataFrame:
                          "z_ref_lo": d["lp_zpdf_l68"][keep].to_numpy(), "z_ref_hi": d["lp_zpdf_u68"][keep].to_numpy()})
 
 
+def cosmos_specz_reference(path, reliable_flags=(3, 4, 13, 14)) -> pd.DataFrame:
+    """COSMOS Spectroscopic Redshift Compilation (Khostovan et al. 2026, ApJS 282, 6; DR1.1 unique file).
+
+    Keeps redshifts with quality flags of at least 95% confidence (3, 4; +10 for broad-line
+    objects, which are marked ``is_bl_agn``). Positions are the Gaia-corrected ones; z < 0.003
+    is treated as a star. Source: github.com/cosmosastro/speczcompilation.
+    """
+    from astropy.table import Table
+
+    t = Table.read(Path(path).expanduser())
+    flag = np.asarray(t["flag"], dtype=int)
+    z = np.asarray(t["specz"], dtype=float)
+    keep = np.isin(flag, reliable_flags) & np.isfinite(z) & (z >= 0)
+    return pd.DataFrame({"ra": np.asarray(t["ra_corrected"], float)[keep], "dec": np.asarray(t["dec_corrected"], float)[keep],
+                         "z_ref": z[keep], "z_type": "spec", "is_bl_agn": flag[keep] >= 10,
+                         "is_star": z[keep] < 0.003})
+
+
 def cdfs_xray_reference() -> pd.DataFrame:
     """CDF-S 7 Ms sources (Luo et al. 2017): adopted redshift (spec-z where available), L_X, class."""
     from astroquery.vizier import Vizier

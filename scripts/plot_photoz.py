@@ -1,15 +1,17 @@
 """Photo-z vs reference redshift for validate_real.py outputs, galaxies and AGN in separate panels.
 
-One figure per model: columns are the reference data sets (COSMOS2020, CDF-S X-ray, Milliquas),
+One figure per model: columns are the reference data sets (COSMOS, CDF-S X-ray, Milliquas),
 rows are galaxies and AGN. Each panel shows the 1:1 line, the outlier boundary
 |dz|/(1+z) = 0.15, and N, NMAD, outlier fraction and median bias.
 
-AGN labels: CDF-S uses the X-ray catalogue's AGN classification; COSMOS2020 has no AGN flag,
-so AGN there are variable (all_varSigClip >= 5) or Gaia QSO candidates; every Milliquas source
-is an AGN. CDF-S panels use spectroscopic references only. COSMOS2020 references are its
-photometric redshifts.
+All references are spectroscopic: COSMOS uses the COSMOS Spectroscopic Redshift Compilation
+(Khostovan et al. 2026; flags 3/4 and broad-line 13/14), CDF-S its spec-z subset, and Milliquas.
+AGN labels: COSMOS broad-line objects plus variable (all_varSigClip >= 5) or Gaia QSO sources;
+the CDF-S X-ray catalogue's AGN classification; every Milliquas source is an AGN.
 
 usage: python scripts/plot_photoz.py --val-dir data/sims --model v6c [--model v6w ...] --out data/sims/plots
+
+Needs validate_real.py outputs val_<reference>_<model>.parquet for cosmos-specz, cdfs-xray and milliquas.
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from jaxsedfit.mplstyle import use_style  # noqa: E402
 
-DATASETS = [("cosmos2020", "COSMOS2020", r"$z_{\rm COSMOS2020\ phot}$"),
+DATASETS = [("cosmos-specz", "COSMOS", r"$z_{\rm spec}$"),
             ("cdfs-xray", "CDF-S", r"$z_{\rm spec}$"),
             ("milliquas", "Milliquas", r"$z_{\rm spec}$")]
 Z_MAX = 4.5
@@ -40,7 +42,8 @@ def split(ref: str, d: pd.DataFrame) -> dict[str, pd.DataFrame]:
     elif ref == "milliquas":
         agn = pd.Series(True, index=d.index)
     else:
-        agn = (d["all_varSigClip"] >= 5) | d["gaia_qso"].fillna(False).astype(bool)
+        variable = (d["all_varSigClip"] >= 5) | d["gaia_qso"].fillna(False).astype(bool)
+        agn = variable | d["ref_is_bl_agn"].astype(bool) if "ref_is_bl_agn" in d else variable
     return {"galaxies": d[~agn], "AGN": d[agn]}
 
 
@@ -104,14 +107,96 @@ def plot_model(val_dir: Path, model: str, out: Path) -> Path:
     return fn
 
 
+MASS_RANGE = (7.0, 12.5)
+MASS_OUTLIER_DEX = 0.5
+
+
+def mass_metrics(ref: np.ndarray, ours: np.ndarray) -> dict[str, float]:
+    """N, median offset, NMAD scatter (dex) and fraction off by more than MASS_OUTLIER_DEX."""
+    d = ours - ref
+    return {"n": len(d), "offset": np.median(d), "scatter": 1.4826 * np.median(np.abs(d - np.median(d))),
+            "outlier": np.mean(np.abs(d) > MASS_OUTLIER_DEX)}
+
+
+def match_masses(val: pd.DataFrame, masses: pd.DataFrame, radius_arcsec: float = 1.0) -> pd.DataFrame:
+    """Attach the nearest fixed-spec-z reference mass within ``radius_arcsec`` to each validated object."""
+    from astropy import units as u
+    from astropy.coordinates import SkyCoord
+
+    a = SkyCoord(val["coord_ra"].to_numpy(float) * u.deg, val["coord_dec"].to_numpy(float) * u.deg)
+    b = SkyCoord(masses["ra"].to_numpy(float) * u.deg, masses["dec"].to_numpy(float) * u.deg)
+    idx, sep, _ = a.match_to_catalog_sky(b)
+    ok = sep.arcsec < radius_arcsec
+    out = val[ok].copy()
+    for c in ("logM_ref", "is_bl_agn", "z_spec"):
+        out[c] = masses[c].to_numpy()[idx[ok]]
+    return out
+
+
+def plot_mass(val_dir: Path, model: str, masses_path: Path, out: Path) -> Path | None:
+    """Posterior-median stellar mass vs COSMOS LePhare masses fitted at the spectroscopic redshift.
+
+    Galaxies and AGN in separate panels (AGN: broad-line, variable or Gaia QSO). Each panel gives N,
+    the median offset and NMAD scatter of log M_ours - log M_ref, the fraction off by more than
+    MASS_OUTLIER_DEX, and the same statistics for objects whose photo-z is not an outlier.
+    LePhare uses BC03 with a Chabrier IMF; our masses are surviving stellar masses (Kroupa IMF),
+    so a few hundredths of a dex offset is expected. AGN reference masses come from galaxy-only fits.
+    """
+    path = val_dir / f"val_cosmos-specz_{model}.parquet"
+    if not path.exists() or not masses_path.exists():
+        return None
+    d = match_masses(pd.read_parquet(path), pd.read_parquet(masses_path))
+    agn = d["is_bl_agn"].astype(bool) | (d["all_varSigClip"] >= 5) | d["gaia_qso"].fillna(False).astype(bool)
+    with use_style():
+        fig, axes = plt.subplots(1, 2, figsize=(9.6, 5.2), sharex=True, sharey=True)
+        grid = np.linspace(*MASS_RANGE, 50)
+        for ax, (label, sub, color) in zip(axes, [("galaxies", d[~agn], "C0"), ("AGN", d[agn], "C3")]):
+            ref = sub["logM_ref"].to_numpy(float)
+            ours = sub["post_log_stellar_mass_med"].to_numpy(float)
+            if len(sub) > 3000:
+                ax.hexbin(ref, ours, gridsize=60, extent=MASS_RANGE + MASS_RANGE, bins="log", mincnt=1, cmap="Greys")
+            elif len(sub):
+                ax.scatter(ref, ours, s=6, alpha=0.6, color=color, lw=0)
+            ax.plot(grid, grid, color="k", lw=0.8)
+            for sign in (-1, 1):
+                ax.plot(grid, grid + sign * MASS_OUTLIER_DEX, color="k", lw=0.6, ls="--")
+            if len(sub):
+                m = mass_metrics(ref, ours)
+                zp = sub["post_redshift_med"].to_numpy(float)
+                good = np.abs(zp - sub["z_spec"].to_numpy(float)) / (1 + sub["z_spec"].to_numpy(float)) <= OUTLIER
+                g = mass_metrics(ref[good], ours[good]) if good.any() else None
+                text = (f"N = {m['n']}\noffset = {m['offset']:+.2f} dex\nscatter = {m['scatter']:.2f} dex\n"
+                        f"|Δ| > {MASS_OUTLIER_DEX} dex: {100 * m['outlier']:.1f}%")
+                if g:
+                    text += f"\nphoto-z ok ({g['n']}): {g['offset']:+.2f} / {g['scatter']:.2f} dex"
+                ax.text(0.04, 0.96, text, transform=ax.transAxes, va="top", ha="left", fontsize=10,
+                        bbox=dict(facecolor="white", edgecolor="none", alpha=0.8))
+            ax.set_title(label)
+            ax.set_xlim(*MASS_RANGE)
+            ax.set_ylim(*MASS_RANGE)
+            ax.set_aspect("equal")
+            ax.set_xlabel(r"$\log M_\star$ (COSMOS LePhare at $z_{\rm spec}$)")
+        axes[0].set_ylabel(r"$\log M_\star$ (jaxpz posterior median)")
+        fig.suptitle(f"jaxpz {model}: stellar mass vs COSMOS")
+        fig.tight_layout()
+        out.mkdir(parents=True, exist_ok=True)
+        fn = out / f"mass_{model}.png"
+        fig.savefig(fn, dpi=150)
+        plt.close(fig)
+    return fn
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--val-dir", default="data/sims", help="directory with val_<reference>_<model>.parquet files")
     p.add_argument("--model", action="append", required=True, help="model label (repeatable), e.g. v6c")
     p.add_argument("--out", default="data/sims/plots")
+    p.add_argument("--masses", default="data/cosmos_specz_lephare_masses.parquet",
+                   help="COSMOS fixed-spec-z LePhare masses (ra, dec, z_spec, is_bl_agn, logM_ref) for mass_<model>.png")
     args = p.parse_args(argv)
     for model in args.model:
         print(plot_model(Path(args.val_dir), model, Path(args.out)))
+        print(plot_mass(Path(args.val_dir), model, Path(args.masses), Path(args.out)))
 
 
 if __name__ == "__main__":
