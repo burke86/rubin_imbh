@@ -98,7 +98,6 @@ def plot_model(val_dir: Path, model: str, out: Path) -> Path:
                     ax.set_xlabel(ref_label)
                 if j == 0:
                     ax.set_ylabel(rf"{cls}: $z_{{\rm phot}}$")
-        fig.suptitle(f"jaxpz {model}: photo-z vs reference redshift")
         fig.tight_layout()
         out.mkdir(parents=True, exist_ok=True)
         fn = out / f"photoz_{model}.pdf"
@@ -177,7 +176,6 @@ def plot_mass(val_dir: Path, model: str, masses_path: Path, out: Path) -> Path |
             ax.set_aspect("equal")
             ax.set_xlabel(r"$\log M_\star$ (COSMOS LePhare at $z_{\rm spec}$)")
         axes[0].set_ylabel(r"$\log M_\star$ (jaxpz posterior median)")
-        fig.suptitle(f"jaxpz {model}: stellar mass vs COSMOS")
         fig.tight_layout()
         out.mkdir(parents=True, exist_ok=True)
         fn = out / f"mass_{model}.pdf"
