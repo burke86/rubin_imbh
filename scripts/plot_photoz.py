@@ -101,8 +101,8 @@ def plot_model(val_dir: Path, model: str, out: Path) -> Path:
         fig.suptitle(f"jaxpz {model}: photo-z vs reference redshift")
         fig.tight_layout()
         out.mkdir(parents=True, exist_ok=True)
-        fn = out / f"photoz_{model}.png"
-        fig.savefig(fn, dpi=150)
+        fn = out / f"photoz_{model}.pdf"
+        fig.savefig(fn)
         plt.close(fig)
     return fn
 
@@ -180,8 +180,8 @@ def plot_mass(val_dir: Path, model: str, masses_path: Path, out: Path) -> Path |
         fig.suptitle(f"jaxpz {model}: stellar mass vs COSMOS")
         fig.tight_layout()
         out.mkdir(parents=True, exist_ok=True)
-        fn = out / f"mass_{model}.png"
-        fig.savefig(fn, dpi=150)
+        fn = out / f"mass_{model}.pdf"
+        fig.savefig(fn)
         plt.close(fig)
     return fn
 
@@ -192,7 +192,7 @@ def main(argv=None):
     p.add_argument("--model", action="append", required=True, help="model label (repeatable), e.g. v6c")
     p.add_argument("--out", default="data/sims/plots")
     p.add_argument("--masses", default="data/cosmos_specz_lephare_masses.parquet",
-                   help="COSMOS fixed-spec-z LePhare masses (ra, dec, z_spec, is_bl_agn, logM_ref) for mass_<model>.png")
+                   help="COSMOS fixed-spec-z LePhare masses (ra, dec, z_spec, is_bl_agn, logM_ref) for mass_<model>.pdf")
     args = p.parse_args(argv)
     for model in args.model:
         print(plot_model(Path(args.val_dir), model, Path(args.out)))
