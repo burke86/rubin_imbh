@@ -402,10 +402,21 @@ input costs accuracy at this training length; the AGN fraction is poorly constra
 scatter 2.6, 68% coverage 0.47 with z known). Population prior, CDF-S, mean
 P(λ_Edd > 0.01): not X-ray AGN 0.03, X-ray AGN 0.10, variable X-ray AGN 0.97–0.98.
 
-Next: a quasar-luminosity-function prior for AGN-dominated objects (reweighting test, then
-training-set resampling in jaxpz); longer training / a larger flow for the spec-z-input
-model; DP2 BPZ/FlexZBoost on the Milliquas objects for a fair quasar benchmark; then
-`jaxpz predict` on the full variable sample.
+Physical population prior (jaxpz `PopulationPriors`): mass function × volume, sSFR and dust
+vs mass and redshift, Eddington-ratio AGN with luminosity evolution and no 10^46 cap. Reweighting
+the v3 simulations to it showed (i) v3's p(z | host m) prior made 33% of r < 21.5 objects
+AGN-dominated, half of them at z < 0.5 (realistic: ~0.7%), explaining its low-z Seyfert and
+high-z quasar errors; (ii) jaxsedfit's mass-independent default SFH makes galaxies 0.5–3 mag too
+bright at fixed (z, M*). `npe_v4` (2×10^6 drawn directly from the hand-set population) is worse
+than v3: COSMOS 0.121 / 34% (v3 0.102 / 30%), bright-end bias +0.04, 68% coverage 0.44–0.51
+(v3 0.64–0.71); CDF-S 0.110 / 35%; Milliquas 0.36 / 72% (v3 0.37 / 64%); L5100–L_X Spearman 0.35
+(v3 0.23). The hand-set population still puts bright galaxies at too high z, so the prior biases
+the posteriors: the motivation for inferring the population hyperparameters from the data
+(jaxpz `docs/design/hierarchical_population.rst`; Phase 1 code in jaxpz.hierarchical).
+
+Next: hierarchical fit of the population on COSMOS (broad-prior training set and model, then
+`jaxpz fit-population`); retrain under the fitted population; then `jaxpz predict` on the full
+variable sample.
 
 ## DIA-source calibration history (Oct 2026)
 
