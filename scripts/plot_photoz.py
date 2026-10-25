@@ -1,6 +1,6 @@
 """Photo-z vs reference redshift for validate_real.py outputs, galaxies and AGN in separate panels.
 
-One figure per model: columns are the reference data sets (COSMOS, CDF-S X-ray, Milliquas),
+One figure per model: columns are the reference data sets (COSMOS2020, CDF-S X-ray, Milliquas),
 rows are galaxies and AGN. Each panel shows the 1:1 line, the outlier boundary
 |dz|/(1+z) = 0.15, and N, NMAD, outlier fraction and median bias.
 
@@ -27,7 +27,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from jaxsedfit.mplstyle import use_style  # noqa: E402
 
-DATASETS = [("cosmos-specz", "COSMOS", r"$z_{\rm spec}$"),
+DATASETS = [("cosmos-specz", "COSMOS2020", r"$z_{\rm spec}$"),
             ("cdfs-xray", "CDF-S", r"$z_{\rm spec}$"),
             ("milliquas", "Milliquas", r"$z_{\rm spec}$")]
 Z_MAX = 4.5
@@ -174,7 +174,7 @@ def plot_mass(val_dir: Path, model: str, masses_path: Path, out: Path) -> Path |
             ax.set_xlim(*MASS_RANGE)
             ax.set_ylim(*MASS_RANGE)
             ax.set_aspect("equal")
-            ax.set_xlabel(r"$\log M_\star$ (COSMOS LePhare at $z_{\rm spec}$)")
+            ax.set_xlabel(r"$\log M_\star$ (COSMOS2020 LePhare at $z_{\rm spec}$)")
         axes[0].set_ylabel(r"$\log M_\star$ (jaxpz posterior median)")
         fig.tight_layout()
         out.mkdir(parents=True, exist_ok=True)
