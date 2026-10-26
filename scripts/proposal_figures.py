@@ -2,8 +2,8 @@
 
 1. pipeline.pdf: simulate -> observe like DP2 -> train the flow (weighted by empirical priors)
    -> posteriors -> validation, with the loop back to the model and priors.
-2. compute_time.pdf: CPU core-hours to process DP2 and DR1 with per-object MAP + Laplace fitting,
-   batched (vectorized) fitting and NPE, from per-object speeds measured in this project, with
+2. compute_time.pdf: grouped bars of the CPU core-hours to process DP2 and DR1 with per-object
+   MAP + Laplace fitting, batched (vectorized) fitting and NPE, from per-object speeds measured in this project, with
    the wall-clock time on a 1,000-core cluster beside each.
 
 Catalogue sizes: DP2 ~7.9e8 objects (RTN-115 draft), DR1 2.3e10 (DMTN-048 planning estimate).
@@ -102,49 +102,39 @@ def sci(x: float) -> str:
 
 
 def compute_time(out: Path) -> Path:
-    """Core-hours to process DP2 and DR1 per method; labels give the wall-clock time on a 1,000-core cluster."""
+    """Core-hours to process DP2 and DR1 per method, as grouped bars on a log axis; each bar is
+    labelled with its core-hours and the wall-clock time on a 1,000-core cluster."""
+    colors = ["0.72", "0.5", "C0"]
+    width = 0.26
     with use_style():
-        fig, ax = plt.subplots(figsize=(8.0, 3.9))
-        y, yticks, ylabels = 0.0, [], []
-        for cat, n in CATALOGUES.items():
-            exp = int(np.floor(np.log10(n)))
-            ax.annotate(rf"{cat}: {n / 10**exp:.1f} $\times$ 10$^{{{exp}}}$ objects", xy=(0.0, y),
-                        xycoords=("axes fraction", "data"), xytext=(-5, 0), textcoords="offset points",
-                        ha="right", va="center", fontweight="bold", fontsize=10.5)
-            y -= 0.6
-            for label, core_sec, fixed in METHODS:
-                core_h = n * core_sec / 3600 + fixed
-                npe = label.startswith("NPE")
-                color = "C0" if npe else "0.6"
-                ax.plot([1e2, core_h], [y, y], color=color, lw=1.3, alpha=1.0 if npe else 0.7)
-                ax.plot([core_h], [y], "o", color=color, ms=7)
-                ax.text(core_h * 1.7, y, rf"{sci(core_h)} core-h  $\cdot$  {fmt_time(core_h / CLUSTER_CORES)}",
-                        va="center", fontsize=9.5, fontweight="bold" if npe else "normal")
-                yticks.append(y)
-                ylabels.append(label)
-                y -= 0.6
-            y -= 0.35
-        ax.set_xscale("log")
-        ax.set_xlim(1e2, 3e11)
-        ax.set_xticks([1e3, 1e5, 1e7, 1e9])
-        ax.set_xticklabels([r"10$^3$", r"10$^5$", r"10$^7$", r"10$^9$"])
-        ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+        fig, ax = plt.subplots(figsize=(7.2, 4.6))
+        cats = list(CATALOGUES)
+        for j, (label, core_sec, fixed) in enumerate(METHODS):
+            npe = label.startswith("NPE")
+            xs = np.arange(len(cats)) + (j - 1) * width
+            vals = np.array([CATALOGUES[c] * core_sec / 3600 + fixed for c in cats])
+            ax.bar(xs, vals, width=width * 0.92, bottom=0, color=colors[j], label=label, zorder=2)
+            for x, v in zip(xs, vals):
+                ax.text(x, v * 1.6, f"{sci(v)}\n{fmt_time(v / CLUSTER_CORES)}", ha="center", va="bottom",
+                        fontsize=8.5, fontweight="bold" if npe else "normal", linespacing=1.15)
+        ax.set_yscale("log")
+        ax.set_ylim(1e2, 3e10)
+        ax.set_yticks([1e2, 1e4, 1e6, 1e8, 1e10])
+        ax.set_yticklabels([r"10$^2$", r"10$^4$", r"10$^6$", r"10$^8$", r"10$^{10}$"])
         ax.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())
-        ax.tick_params(which="both", top=False, right=False, left=False)
-        ax.tick_params(axis="x", labelsize=9.5)
-        ax.set_yticks(yticks)
-        ax.set_yticklabels(ylabels, fontsize=9.5)
-        for t, lab in zip(ax.get_yticklabels(), ylabels):
-            if lab.startswith("NPE"):
-                t.set_fontweight("bold")
-        ax.set_ylim(y + 0.2, 0.4)
-        ax.grid(axis="x", color="0.9", lw=0.8)
-        ax.set_axisbelow(True)
-        for side in ("left", "right", "top"):
+        ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+        ax.set_xticks(np.arange(len(cats)))
+        ax.set_xticklabels([rf"{c}" + "\n" + rf"{sci(CATALOGUES[c])} objects" for c in cats], fontsize=10)
+        ax.tick_params(which="both", top=False, right=False, bottom=False)
+        ax.tick_params(axis="y", labelsize=10)
+        ax.set_xlim(-0.6, len(cats) - 0.4)
+        ax.grid(axis="y", color="0.9", lw=0.8, zorder=0)
+        for side in ("right", "top"):
             ax.spines[side].set_visible(False)
-        ax.set_xlabel("CPU core-hours", fontsize=10.5)
-        ax.text(1.0, 1.02, f"labels: core-hours $\\cdot$ wall-clock time on {CLUSTER_CORES:,} cores", transform=ax.transAxes,
-                ha="right", va="bottom", fontsize=9, color="0.35")
+        ax.set_ylabel("CPU core-hours", fontsize=11)
+        ax.legend(loc="upper left", fontsize=8.5, frameon=False)
+        ax.text(1.0, 1.01, f"labels: core-hours, wall-clock time on {CLUSTER_CORES:,} cores", transform=ax.transAxes,
+                ha="right", va="bottom", fontsize=8.5, color="0.35")
         fig.tight_layout()
         fn = out / "compute_time.pdf"
         fig.savefig(fn, bbox_inches="tight")
