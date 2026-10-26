@@ -133,8 +133,6 @@ def compute_time(out: Path) -> Path:
             ax.spines[side].set_visible(False)
         ax.set_ylabel("CPU hours", fontsize=11)
         ax.legend(loc="upper left", fontsize=8.5, frameon=False)
-        ax.text(1.0, 1.01, f"labels: CPU hours, wall-clock time on {CLUSTER_CORES:,} cores", transform=ax.transAxes,
-                ha="right", va="bottom", fontsize=8.5, color="0.35")
         fig.tight_layout()
         fn = out / "compute_time.pdf"
         fig.savefig(fn, bbox_inches="tight")
