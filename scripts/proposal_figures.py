@@ -115,7 +115,7 @@ def compute_time(out: Path) -> Path:
             vals = np.array([CATALOGUES[c] * core_sec / 3600 + fixed for c in cats])
             ax.bar(xs, vals, width=width * 0.92, bottom=0, color=colors[j], label=label, zorder=2)
             for x, v in zip(xs, vals):
-                ax.text(x, v * 1.6, f"{sci(v)}\nCPU hours\n{fmt_time(v / CLUSTER_CORES)}", ha="center", va="bottom",
+                ax.text(x, v * 1.6, f"{sci(v)}\nCPU hours\n({fmt_time(v / CLUSTER_CORES)})", ha="center", va="bottom",
                         fontsize=8.5, fontweight="bold" if npe else "normal", linespacing=1.15)
         ax.set_yscale("log")
         ax.set_ylim(1e2, 3e10)
