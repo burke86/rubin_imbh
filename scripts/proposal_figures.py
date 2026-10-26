@@ -121,16 +121,12 @@ def compute_time(out: Path) -> Path:
         ax.set_ylim(1e2, 3e10)
         ax.set_yticks([1e2, 1e4, 1e6, 1e8, 1e10])
         ax.set_yticklabels([r"10$^2$", r"10$^4$", r"10$^6$", r"10$^8$", r"10$^{10}$"])
-        ax.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())
         ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
         ax.set_xticks(np.arange(len(cats)))
         ax.set_xticklabels([rf"LSST {c}" + "\n" + rf"{sci(CATALOGUES[c])} objects" for c in cats], fontsize=10)
-        ax.tick_params(which="both", top=False, right=False, bottom=False)
+        ax.tick_params(axis="x", which="both", top=False, bottom=False)  # categories; y ticks on both sides
         ax.tick_params(axis="y", labelsize=10)
         ax.set_xlim(-0.6, len(cats) - 0.4)
-        ax.grid(axis="y", color="0.9", lw=0.8, zorder=0)
-        for side in ("right", "top"):
-            ax.spines[side].set_visible(False)
         ax.set_ylabel("CPU hours", fontsize=11)
         ax.legend(loc="upper left", fontsize=8.5, frameon=False)
         fig.tight_layout()
