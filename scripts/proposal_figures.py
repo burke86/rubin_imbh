@@ -6,7 +6,8 @@
    MAP + Laplace fitting, batched (vectorized) fitting and NPE, from per-object speeds measured in this project, with
    the wall-clock time on a 1,000-core cluster beside each.
 3. one_shot.pdf: cartoon contrasting the traditional sequence (classify AGN, then photo-z, then SED
-   fit, each step passing on a point estimate) with the single joint posterior of NPE.
+   fit, each step passing on a point estimate) with the single joint posterior of NPE from photometry,
+   variability and Rubin + Euclid pixels.
 
 Catalog sizes: DP2 ~7.9e8 objects (RTN-115 draft), DR1 2.3e10 (DMTN-048 planning estimate).
 
@@ -214,29 +215,39 @@ def one_shot(out: Path) -> Path:
         ax.plot([0.2, 9.8], [2.33, 2.33], color="0.82", lw=0.8)
         ax.text(0.2, 2.1, "This proposal: one shot", fontsize=10.5, fontweight="bold", va="center", color=blue)
         yb = 1.12
-        sed_icon(0.2, yb - 0.3, 0.68, 0.62)
-        a = inset(0.95, yb - 0.3, 0.68, 0.62)
+        sed_icon(0.2, yb - 0.3, 0.52, 0.62)
+        a = inset(0.77, yb - 0.3, 0.52, 0.62)
         t = np.sort(rng.uniform(0, 1, 25))
         lc = np.cumsum(rng.normal(0, 0.2, t.size))
-        a.errorbar(t, lc - lc.mean(), yerr=0.12, fmt="o", ms=1.8, color="k", elinewidth=0.6, capsize=0)
-        ax.text(0.915, yb - 0.37, "photometry + variability", ha="center", va="top", fontsize=7.5, color="0.3")
-        bx, bw2 = 3.27, 2.85
+        a.errorbar(t, lc - lc.mean(), yerr=0.12, fmt="o", ms=1.6, color="k", elinewidth=0.6, capsize=0)
+        # pixel cutouts of the same host + nucleus: Rubin (seeing-limited) above Euclid VIS (sharp)
+        yy, xx = np.mgrid[-12:12, -12:12] + 0.5
+        host = np.exp(-np.hypot(xx * np.cos(0.5) + yy * np.sin(0.5), (yy * np.cos(0.5) - xx * np.sin(0.5)) / 0.55) / 2.5)
+        for k, (name, psf) in enumerate((("Rubin", 2.6), ("Euclid", 0.8))):
+            kern = np.exp(-(xx**2 + yy**2) / (2 * psf**2))
+            img = np.real(np.fft.ifft2(np.fft.fft2(host) * np.fft.fft2(np.fft.ifftshift(kern / kern.sum()))))
+            img += 0.9 * kern / kern.max() * (0.8 / psf) ** 2 + rng.normal(0, 0.02, img.shape)
+            a = inset(1.35 + k * 0.5, yb - 0.3, 0.46, 0.46)
+            a.imshow(np.arcsinh(img / 0.05), cmap="magma", origin="lower", interpolation="nearest")
+            ax.text(1.58 + k * 0.5, yb + 0.2, name, ha="center", va="bottom", fontsize=7, color="0.3")
+        ax.text(1.24, yb - 0.37, "photometry, variability,\nRubin + Euclid pixels", ha="center", va="top", fontsize=7.5,
+                color="0.3", linespacing=1.1)
+        bx, bw2 = 3.63, 2.3
         box(bx, yb, bw2, 1.05, blue, face="#eef4fb", lw=1.6)
-        ax.text(bx, yb + 0.27, "Neural posterior estimator", ha="center", va="center", fontsize=9, fontweight="bold")
-        ax.text(bx, yb - 0.15, "one population of host + AGN\nsimulations, no AGN / galaxy\nsplit; trained once",
-                ha="center", va="center", fontsize=7.5, color="0.3", linespacing=1.1)
-        arrow(1.68, bx - bw2 / 2 - 0.03, yb, color=blue)
-        arrow(bx + bw2 / 2 + 0.03, 4.95, yb, color=blue)
+        ax.text(bx, yb + 0.24, "Neural posterior\nestimator", ha="center", va="center", fontsize=9, fontweight="bold",
+                linespacing=1.05)
+        ax.text(bx, yb - 0.26, "one host + AGN population;\nno AGN / galaxy split", ha="center", va="center",
+                fontsize=7.5, color="0.3", linespacing=1.1)
+        arrow(2.36, bx - bw2 / 2 - 0.03, yb - 0.07, color=blue)
+        arrow(bx + bw2 / 2 + 0.03, 5.1, yb, color=blue)
         f = fig.transFigure.inverted()
-        (fx, fy), (fx1, fy1) = f.transform(ax.transData.transform([(5.25, 0.6), (7.6, 1.62)]))
+        (fx, fy), (fx1, fy1) = f.transform(ax.transData.transform([(5.35, 0.6), (7.6, 1.62)]))
         _posterior_row(fig, (fx, fy, fx1 - fx, fy1 - fy), blue)
         ax.text(7.75, 1.72, "single joint posterior", fontsize=9.5, fontweight="bold", color=blue, va="top")
         ax.text(7.75, 1.45, r"$p(z, M_\star, f_{\rm AGN}, \ldots \mid {\rm data})$", fontsize=8.5, color=blue,
                 va="top")
         ax.text(7.75, 1.12, "• AGN class → posterior of $f_{\\rm AGN}$\n• photo-z degeneracies kept\n"
                 "• errors fully propagated", fontsize=7.5, va="top", color="0.2", linespacing=1.2)
-        ax.plot([7.83], [0.42], marker="*", color="k", ms=5.5, mew=0)
-        ax.text(7.95, 0.42, "truth", fontsize=7.5, va="center", color="0.2")
         fn = out / "one_shot.pdf"
         fig.savefig(fn)
         plt.close(fig)
