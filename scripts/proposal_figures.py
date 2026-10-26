@@ -124,7 +124,7 @@ def compute_time(out: Path) -> Path:
         ax.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())
         ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
         ax.set_xticks(np.arange(len(cats)))
-        ax.set_xticklabels([rf"{c}" + "\n" + rf"{sci(CATALOGUES[c])} objects" for c in cats], fontsize=10)
+        ax.set_xticklabels([rf"LSST {c}" + "\n" + rf"{sci(CATALOGUES[c])} objects" for c in cats], fontsize=10)
         ax.tick_params(which="both", top=False, right=False, bottom=False)
         ax.tick_params(axis="y", labelsize=10)
         ax.set_xlim(-0.6, len(cats) - 0.4)
