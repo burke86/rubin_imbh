@@ -5,6 +5,8 @@
 2. compute_time.pdf: grouped bars of the CPU core-hours to process DP2 and DR1 with per-object
    MAP + Laplace fitting, batched (vectorized) fitting and NPE, from per-object speeds measured in this project, with
    the wall-clock time on a 1,000-core cluster beside each.
+3. one_shot.pdf: cartoon contrasting the traditional sequence (classify AGN, then photo-z, then SED
+   fit, each step passing on a point estimate) with the single joint posterior of NPE.
 
 Catalogue sizes: DP2 ~7.9e8 objects (RTN-115 draft), DR1 2.3e10 (DMTN-048 planning estimate).
 
@@ -85,6 +87,168 @@ def pipeline(out: Path) -> Path:
     return fn
 
 
+def _gauss2(x, y, mx, my, sx, sy, rho):
+    u, v = (x - mx) / sx, (y - my) / sy
+    return np.exp(-(u**2 - 2 * rho * u * v + v**2) / (2 * (1 - rho**2)))
+
+
+# cartoon joint posterior of a faint variable AGN: a low-z, host-dominated solution and a high-z,
+# AGN-dominated one; (weight, means (z, log M*, f_AGN), sigmas, correlations zm, zf, mf)
+MODES = [(0.6, (0.7, 9.6, 0.35), (0.12, 0.35, 0.12), (0.6, 0.5, 0.3)),
+         (0.4, (2.1, 10.4, 0.8), (0.18, 0.45, 0.07), (0.5, 0.4, 0.2))]
+TRUTH = (2.0, 10.3, 0.78)
+LIMS = [(0.0, 2.8), (8.4, 11.6), (0.0, 1.05)]
+NAMES = [r"$z$", r"$\log M_\star$", r"$f_{\rm AGN}$"]
+
+
+def _thin_frame(a, color="0.55"):
+    a.set_xticks([])
+    a.set_yticks([])
+    a.tick_params(which="both", left=False, right=False, top=False, bottom=False)
+    for sp in a.spines.values():
+        sp.set_linewidth(0.6)
+        sp.set_color(color)
+
+
+def _corner(fig, rect, color):
+    """Lower-triangle corner plot of the cartoon posterior in figure coordinates ``rect``."""
+    x0, y0, w, h = rect
+    n, gap = 3, 0.005
+    cw, ch = (w - gap * (n - 1)) / n, (h - gap * (n - 1)) / n
+    grids = [np.linspace(*lim, 200) for lim in LIMS]
+    for i in range(n):
+        for j in range(i + 1):
+            ax = fig.add_axes((x0 + j * (cw + gap), y0 + (n - 1 - i) * (ch + gap), cw, ch))
+            _thin_frame(ax)
+            ax.set_xlim(*LIMS[j])
+            if i == j:
+                g = grids[i]
+                p = sum(wt * np.exp(-0.5 * ((g - mu[i]) / sg[i]) ** 2) / sg[i] for wt, mu, sg, _ in MODES)
+                ax.fill_between(g, p, color=color, alpha=0.25, lw=0)
+                ax.plot(g, p, color=color, lw=1.1)
+                ax.axvline(TRUTH[i], color="k", lw=0.8, ls=":")
+                ax.set_ylim(0, p.max() * 1.15)
+            else:
+                X, Y = np.meshgrid(grids[j], grids[i])
+                k = {(1, 0): 0, (2, 0): 1, (2, 1): 2}[(i, j)]
+                p = sum(wt * _gauss2(X, Y, mu[j], mu[i], sg[j], sg[i], rho[k]) / (sg[i] * sg[j])
+                        for wt, mu, sg, rho in MODES)
+                lev = p.max() * np.array([0.08, 0.35, 0.7, 1.01])
+                ax.contourf(X, Y, p, levels=lev, colors=[color], alpha=0.18)
+                ax.contour(X, Y, p, levels=lev[:-1], colors=[color], linewidths=0.8)
+                ax.plot(TRUTH[j], TRUTH[i], marker="*", color="k", ms=5.5, mew=0)
+                ax.set_ylim(*LIMS[i])
+            if i == n - 1:
+                ax.set_xlabel(NAMES[j], fontsize=9, labelpad=2)
+            if j == 0 and i > 0:
+                ax.set_ylabel(NAMES[i], fontsize=9, labelpad=2)
+
+
+def one_shot(out: Path) -> Path:
+    """Traditional sequential inference vs the single joint posterior of NPE (cartoon)."""
+    grey, warn, blue = "0.45", "#b2182b", "C0"
+    with use_style():
+        fig = plt.figure(figsize=(7.2, 4.1))
+        ax = fig.add_axes((0, 0, 1, 1))
+        ax.set_xlim(0, 10)
+        ax.set_ylim(0, 5.7)
+        ax.axis("off")
+
+        def box(x, y, w, h, edge, face="white", lw=1.1):
+            ax.add_patch(FancyBboxPatch((x - w / 2, y - h / 2), w, h, boxstyle="round,pad=0.02,rounding_size=0.08",
+                                        facecolor=face, edgecolor=edge, lw=lw))
+
+        def arrow(x0, x1, y, color=grey, label=None):
+            ax.add_patch(FancyArrowPatch((x0, y), (x1, y), arrowstyle="-|>", mutation_scale=10, color=color, lw=1.1,
+                                         shrinkA=0, shrinkB=0))
+            if label:
+                ax.text((x0 + x1) / 2, y + 0.07, label, ha="center", va="bottom", fontsize=7.5, color="0.25")
+
+        def inset(x, y, w, h):
+            f = fig.transFigure.inverted()
+            (fx, fy), (fx1, fy1) = f.transform(ax.transData.transform([(x, y), (x + w, y + h)]))
+            a = fig.add_axes((fx, fy, fx1 - fx, fy1 - fy))
+            _thin_frame(a)
+            return a
+
+        rng = np.random.default_rng(3)
+        lam = np.array([0.37, 0.48, 0.62, 0.75, 0.87, 0.97])  # ugrizy (micron)
+
+        def sed_icon(x, y, w, h):
+            a = inset(x, y, w, h)
+            f = 0.9 * (lam / 0.6) ** -1.3 + 1.1 * (lam / 0.6) ** 1.5  # AGN power law + host
+            a.errorbar(lam, f + rng.normal(0, 0.04, lam.size), yerr=0.12, fmt="o", ms=2.5, color="k",
+                       elinewidth=0.7, capsize=0)
+            a.set_xlim(0.3, 1.04)
+            a.set_ylim(1.2, 4.2)
+
+        # ---- traditional: three sequential steps
+        yt, bw, bh = 4.45, 1.75, 0.9
+        ax.text(0.2, 5.4, "Traditional: three sequential steps", fontsize=10.5, fontweight="bold", va="center")
+        sed_icon(0.25, yt - 0.35, 0.85, 0.7)
+        ax.text(0.68, yt - 0.42, "photometry", ha="center", va="top", fontsize=7.5, color="0.3")
+        steps = [(2.3, "1. Classify", "AGN or galaxy?\n(colour cut)"),
+                 (4.85, "2. Photo-z", "templates set\nby the class"),
+                 (7.4, "3. SED fit", r"$M_\star$, SFR at" + "\n" + r"fixed $z_{\rm best}$")]
+        for x, title, sub in steps:
+            box(x, yt, bw, bh, grey)
+            ax.text(x, yt + 0.18, title, ha="center", va="center", fontsize=9.5, fontweight="bold")
+            ax.text(x, yt - 0.17, sub, ha="center", va="center", fontsize=7.5, color="0.3", linespacing=1.1)
+        arrow(1.18, 2.3 - bw / 2 - 0.03, yt)
+        arrow(2.3 + bw / 2 + 0.03, 4.85 - bw / 2 - 0.03, yt, label="label")
+        arrow(4.85 + bw / 2 + 0.03, 7.4 - bw / 2 - 0.03, yt, label=r"$z_{\rm best}$")
+        arrow(7.4 + bw / 2 + 0.03, 8.75, yt)
+        for x, txt in ((3.575, "misclassification\nnot carried forward"),
+                       (6.125, "photo-z errors and\ndegeneracies dropped")):
+            ax.text(x, yt - 0.1, "✕", ha="center", va="center", fontsize=9, color=warn)
+            ax.text(x, yt - bh / 2 - 0.08, txt, ha="center", va="top", fontsize=7.5, color=warn, linespacing=1.1)
+        a = inset(8.85, yt - 0.35, 0.95, 0.7)  # an overconfident single mass estimate that misses the truth
+        g = np.linspace(8.4, 11.6, 300)
+        pm = np.exp(-0.5 * ((g - 9.55) / 0.12) ** 2)
+        a.fill_between(g, pm, color=grey, alpha=0.25, lw=0)
+        a.plot(g, pm, color=grey, lw=1.1)
+        a.axvline(TRUTH[1], color="k", ls=":", lw=0.8)
+        a.set_xlim(8.4, 11.6)
+        a.set_ylim(0, 1.2)
+        ax.text(9.32, yt - 0.42, r"$M_\star \pm \sigma$", ha="center", va="top", fontsize=7.5, color="0.3")
+        ax.text(9.32, yt - bh / 2 - 0.22, "too narrow,\nbiased", ha="center", va="top", fontsize=7.5, color=warn,
+                linespacing=1.1)
+
+        # ---- this proposal: one shot
+        ax.plot([0.2, 9.8], [3.2, 3.2], color="0.82", lw=0.8)
+        ax.text(0.2, 2.95, "This proposal: one shot", fontsize=10.5, fontweight="bold", va="center", color=blue)
+        yb = 1.45
+        sed_icon(0.25, yb + 0.1, 0.85, 0.62)
+        a = inset(0.25, yb - 0.72, 0.85, 0.62)
+        t = np.sort(rng.uniform(0, 1, 30))
+        lc = np.cumsum(rng.normal(0, 0.2, t.size))
+        a.errorbar(t, lc - lc.mean(), yerr=0.12, fmt="o", ms=2, color="k", elinewidth=0.6, capsize=0)
+        ax.text(0.68, yb - 0.8, "photometry +\nvariability", ha="center", va="top", fontsize=7.5, color="0.3",
+                linespacing=1.1)
+        box(2.95, yb, 2.35, 1.45, blue, face="#eef4fb", lw=1.6)
+        ax.text(2.95, yb + 0.38, "Neural posterior\nestimator", ha="center", va="center", fontsize=10,
+                fontweight="bold", linespacing=1.1)
+        ax.text(2.95, yb - 0.33, "one population of host + AGN\nsimulations, no AGN / galaxy\nsplit; trained once",
+                ha="center", va="center", fontsize=7.5, color="0.3", linespacing=1.1)
+        arrow(1.18, 2.95 - 2.35 / 2 - 0.03, yb, color=blue)
+        arrow(2.95 + 2.35 / 2 + 0.03, 4.75, yb, color=blue)
+        f = fig.transFigure.inverted()
+        (fx, fy), (fx1, fy1) = f.transform(ax.transData.transform([(5.0, 0.35), (7.7, 2.75)]))
+        _corner(fig, (fx, fy, fx1 - fx, fy1 - fy), blue)
+        ax.text(7.95, 2.6, "single joint posterior", fontsize=9.5, fontweight="bold", color=blue, va="top")
+        ax.text(7.95, 2.3, r"$p(z, M_\star, f_{\rm AGN}, \ldots \mid {\rm data})$", fontsize=8.5, color=blue, va="top")
+        ax.text(7.95, 1.9, "• AGN “classification” is\n   the posterior of $f_{\\rm AGN}$\n"
+                "• photo-z degeneracies and\n   their covariances kept\n"
+                "• uncertainties propagated\n   by construction", fontsize=7.5, va="top", color="0.2",
+                linespacing=1.15)
+        ax.plot([8.03], [0.45], marker="*", color="k", ms=5.5, mew=0)
+        ax.text(8.15, 0.45, "truth", fontsize=7.5, va="center", color="0.2")
+        fn = out / "one_shot.pdf"
+        fig.savefig(fn)
+        plt.close(fig)
+    return fn
+
+
 def fmt_time(hours: float) -> str:
     """Wall-clock words: hours, days or years."""
     if hours < 48:
@@ -142,7 +306,7 @@ def main(argv=None):
     args = p.parse_args(argv)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    for fn in (pipeline(out), compute_time(out)):
+    for fn in (pipeline(out), compute_time(out), one_shot(out)):
         print(fn)
 
 
