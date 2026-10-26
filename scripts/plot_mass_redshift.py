@@ -6,8 +6,7 @@ objectId. Left panel: host mass against the reference (spectroscopic) redshift w
 conditioned on it if the table has ``cond_log_stellar_mass_*`` columns (the posterior given the
 data and z = z_spec), else the redshift-marginal posterior; right panel: the marginal posterior
 against the photo-z posterior median, as for a catalogue without spectra. Points are coloured by the
-width of their 68% host-mass interval (dex), best constrained on top; the medians and 16-84% spread of the host mass are shown in redshift bins, for all objects and for those whose
-mass is constrained (68% interval narrower than --mass-width dex).
+width of their 68% host-mass interval (dex), best constrained on top.
 
 Marginal masses of objects with a catastrophic photo-z follow the wrong redshift.
 
@@ -29,7 +28,6 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from jaxsedfit.mplstyle import use_style  # noqa: E402
 
-Z_EDGES = np.arange(0.0, 4.51, 0.25)
 MASS_RANGE = (7.0, 12.5)
 
 
@@ -43,20 +41,6 @@ def load(paths, min_sig: float) -> pd.DataFrame:
         parts.append(d)
     d = pd.concat(parts, ignore_index=True)
     return d.drop_duplicates("objectId") if "objectId" in d else d
-
-
-def binned(ax, z, m, color, label, ls="-"):
-    """Median and 16-84% of m in redshift bins with at least 10 objects."""
-    c, med, lo, hi = [], [], [], []
-    for a, b in zip(Z_EDGES[:-1], Z_EDGES[1:]):
-        s = (z >= a) & (z < b) & np.isfinite(m)
-        if s.sum() >= 10:
-            c.append(0.5 * (a + b))
-            q = np.percentile(m[s], [16, 50, 84])
-            lo.append(q[0]); med.append(q[1]); hi.append(q[2])
-    if c:
-        ax.plot(c, med, color=color, ls=ls, lw=2, label=label)
-        ax.fill_between(c, lo, hi, color=color, alpha=0.15, lw=0)
 
 
 def main(argv=None):
@@ -80,14 +64,11 @@ def main(argv=None):
             order = np.argsort(-np.nan_to_num(width, nan=np.inf))  # best constrained drawn last, on top
             art = ax.scatter(z[order], m[order], c=width[order], s=4, lw=0, cmap="viridis_r", vmin=0.0, vmax=2.5,
                              rasterized=True)
-            binned(ax, z, m, "C0", "all")
-            binned(ax, z[constrained], m[constrained], "C2", rf"68% mass interval < {args.mass_width:g} dex", ls="--")
             ax.set_xlim(0, 4.5)
             ax.set_xticks(np.arange(0.0, 4.01, 1.0))
             ax.set_ylim(*MASS_RANGE)
             ax.set_xlabel(label)
         axes[0, 0].set_ylabel(r"host $\log M_\star / M_\odot$")
-        axes[0, 0].legend(fontsize=10, loc="lower right")
         cax = axes[0, -1].inset_axes((0.45, 0.2, 0.5, 0.04))
         cb = fig.colorbar(art, cax=cax, orientation="horizontal")
         cb.set_label(r"68% $\log M_\star$ interval (dex)", fontsize=10)
