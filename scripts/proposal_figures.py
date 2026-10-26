@@ -3,7 +3,7 @@
 1. pipeline.pdf: simulate -> observe like DP2 -> train the flow (weighted by empirical priors)
    -> posteriors -> validation, with the loop back to the model and priors.
 2. compute_time.pdf: grouped bars of the CPU core-hours to process DP2 and DR1 with per-object
-   MAP + Laplace fitting, batched (vectorized) fitting and NPE, from per-object speeds measured in this project, with
+   NUTS, per-object MAP + Laplace fitting, batched (vectorized) fitting and NPE, from per-object speeds measured in this project, with
    the wall-clock time on a 1,000-core cluster beside each.
 3. one_shot.pdf: cartoon contrasting the traditional sequence (classify AGN, then photo-z, then SED
    fit, each step passing on a point estimate) with the single joint posterior of NPE from photometry,
@@ -31,8 +31,11 @@ CATALOGUES = {"DP2": 7.9e8, "DR1": 2.3e10}
 # (label, core-seconds per object, one-time core-hours). NPE: measured, 5.6 ms wall per object
 # (100 draws) at 3.25 cores in use; one-time = 1.5 h to simulate and train at the same load.
 # Fitting: 16 s wall per single-object MAP + Laplace fit, counted as one core (favoring it);
+# NUTS: 60 s wall per object (14 s MAP initialization + 45 s for 500 warmup steps and 1,000 draws,
+# one chain; chimera photometry, compile excluded), counted the same way;
 # batched fitting 0.375 s wall per object, counted at the same 3.25 cores as NPE.
 METHODS = [
+    ("Per-object MCMC (NUTS)", 60.0, 0.0),
     ("Per-object fitting (MAP + Laplace)", 16.0, 0.0),
     ("Batched fitting (vectorized MAP + Laplace)", 0.375 * 3.25, 0.0),
     (r"NPE, simulation+training ($\mathbf{this\ proposal}$)", 0.0056 * 3.25, 1.5 * 3.25),
@@ -273,19 +276,19 @@ def sci(x: float) -> str:
 def compute_time(out: Path) -> Path:
     """Core-hours to process DP2 and DR1 per method, as grouped bars on a log axis; each bar is
     labeled with its core-hours and the wall-clock time on a 1,000-core cluster."""
-    colors = ["0.72", "0.5", "C0"]
-    width = 0.26
+    colors = ["0.82", "0.64", "0.45", "C0"]
+    width = 0.2
     with use_style():
         fig, ax = plt.subplots(figsize=(7.2, 3.2))
         cats = list(CATALOGUES)
         for j, (label, core_sec, fixed) in enumerate(METHODS):
             npe = label.startswith("NPE")
-            xs = np.arange(len(cats)) + (j - 1) * width
+            xs = np.arange(len(cats)) + (j - 1.5) * width
             vals = np.array([CATALOGUES[c] * core_sec / 3600 + fixed for c in cats])
             ax.bar(xs, vals, width=width * 0.92, bottom=0, color=colors[j], label=label, zorder=2)
             for x, v in zip(xs, vals):
                 ax.text(x, v * 1.6, f"{sci(v)}\nCPU hours\n({fmt_time(v / CLUSTER_CORES)})", ha="center", va="bottom",
-                        fontsize=8.5, fontweight="bold" if npe else "normal", linespacing=1.15)
+                        fontsize=7.5, fontweight="bold" if npe else "normal", linespacing=1.1)
         ax.set_yscale("log")
         ax.set_ylim(1e3, 3e12)
         ax.set_yticks([1e4, 1e6, 1e8, 1e10, 1e12])
@@ -297,7 +300,7 @@ def compute_time(out: Path) -> Path:
         ax.tick_params(axis="y", labelsize=10)
         ax.set_xlim(-0.6, len(cats) - 0.4)
         ax.set_ylabel("CPU hours", fontsize=11)
-        ax.legend(loc="upper left", fontsize=8.5, frameon=False)
+        ax.legend(loc="upper left", fontsize=8, frameon=False, ncol=2, columnspacing=1.0)
         fig.tight_layout()
         fn = out / "compute_time.pdf"
         fig.savefig(fn, bbox_inches="tight")
