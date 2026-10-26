@@ -107,7 +107,7 @@ def compute_time(out: Path) -> Path:
     colors = ["0.72", "0.5", "C0"]
     width = 0.26
     with use_style():
-        fig, ax = plt.subplots(figsize=(7.2, 4.6))
+        fig, ax = plt.subplots(figsize=(7.2, 3.2))
         cats = list(CATALOGUES)
         for j, (label, core_sec, fixed) in enumerate(METHODS):
             npe = label.startswith("NPE")
@@ -118,9 +118,9 @@ def compute_time(out: Path) -> Path:
                 ax.text(x, v * 1.6, f"{sci(v)}\nCPU hours\n({fmt_time(v / CLUSTER_CORES)})", ha="center", va="bottom",
                         fontsize=8.5, fontweight="bold" if npe else "normal", linespacing=1.15)
         ax.set_yscale("log")
-        ax.set_ylim(1e2, 3e10)
-        ax.set_yticks([1e2, 1e4, 1e6, 1e8, 1e10])
-        ax.set_yticklabels([r"10$^2$", r"10$^4$", r"10$^6$", r"10$^8$", r"10$^{10}$"])
+        ax.set_ylim(1e3, 3e12)
+        ax.set_yticks([1e4, 1e6, 1e8, 1e10, 1e12])
+        ax.set_yticklabels([r"10$^4$", r"10$^6$", r"10$^8$", r"10$^{10}$", r"10$^{12}$"])
         ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
         ax.set_xticks(np.arange(len(cats)))
         ax.set_xticklabels([rf"LSST {c}" + "\n" + rf"{sci(CATALOGUES[c])} objects" for c in cats], fontsize=10)
