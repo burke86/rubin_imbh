@@ -71,7 +71,7 @@ def main(argv=None):
     if "ref_z_ref" in d and np.isfinite(d["ref_z_ref"]).any():
         x_axes.insert(0, ("ref_z_ref", r"$z_{\rm spec}$", "cond" if "cond_log_stellar_mass_med" in d else "post"))
     with use_style():
-        fig, axes = plt.subplots(1, len(x_axes), figsize=(6.4 * len(x_axes), 5.6), sharey=True, squeeze=False)
+        fig, axes = plt.subplots(1, len(x_axes), figsize=(6.4 * len(x_axes), 4.6), sharey=True, squeeze=False)
         for ax, (col, label, pre) in zip(axes[0], x_axes):
             m = d[f"{pre}_log_stellar_mass_med"].to_numpy(float)
             width = (d[f"{pre}_log_stellar_mass_hi"] - d[f"{pre}_log_stellar_mass_lo"]).to_numpy(float)
@@ -86,9 +86,9 @@ def main(argv=None):
             ax.set_xticks(np.arange(0.0, 4.01, 1.0))
             ax.set_ylim(*MASS_RANGE)
             ax.set_xlabel(label)
-        axes[0, 0].set_ylabel(r"host $\log M_\star / M_\odot$ (posterior median)")
+        axes[0, 0].set_ylabel(r"host $\log M_\star / M_\odot$")
         axes[0, 0].legend(fontsize=10, loc="lower right")
-        cax = axes[0, -1].inset_axes((0.45, 0.1, 0.5, 0.035))
+        cax = axes[0, -1].inset_axes((0.45, 0.2, 0.5, 0.04))
         cb = fig.colorbar(art, cax=cax, orientation="horizontal")
         cb.set_label(r"68% $\log M_\star$ interval (dex)", fontsize=10)
         cb.ax.tick_params(labelsize=9)
