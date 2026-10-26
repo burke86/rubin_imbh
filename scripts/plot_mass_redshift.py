@@ -28,7 +28,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from jaxsedfit.mplstyle import use_style  # noqa: E402
 
-MASS_RANGE = (7.0, 12.5)
+MASS_RANGE = (6.5, 11.5)
 
 
 def load(paths, min_sig: float) -> pd.DataFrame:
