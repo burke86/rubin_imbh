@@ -32,7 +32,7 @@ CATALOGUES = {"DP2": 7.9e8, "DR1": 2.3e10}
 METHODS = [
     ("Per-object fitting (MAP + Laplace)", 16.0, 0.0),
     ("Batched fitting (vectorized MAP + Laplace)", 0.375 * 3.25, 0.0),
-    (r"NPE, including simulation and training ($\mathbf{this\ proposal}$)", 0.0056 * 3.25, 1.5 * 3.25),
+    (r"NPE, including simulation+training ($\mathbf{this\ proposal}$)", 0.0056 * 3.25, 1.5 * 3.25),
 ]
 CLUSTER_CORES = 1000
 HOURS_PER_YEAR = 8766.0
