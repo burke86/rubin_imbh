@@ -57,6 +57,7 @@ def colour_tracks(sims: pd.DataFrame, real: pd.DataFrame, agn_frac: float, r_max
     frac = np.clip(sims["varagn_r"] / sims["true_r"], 0, 1)
     sim_mag = {b: mags(sims[f"true_{b}"].to_numpy(float)) for b in BANDS}
     sel = (frac > agn_frac).to_numpy() & (sim_mag["r"] < r_max)
+    unobscured = sims["agn_unobscured"].fillna(False).astype(bool).to_numpy() if "agn_unobscured" in sims else None
     real_mag = {b: mags(real[f"coadd_{b}"].to_numpy(float)) for b in BANDS}
     real_ok = {b: (real[f"coadd_{b}"] / real[f"coadd_err_{b}"] > min_snr).to_numpy() for b in BANDS}
     zs, zr = sims["redshift"].to_numpy(float), real["ref_z_ref"].to_numpy(float)
@@ -71,6 +72,12 @@ def colour_tracks(sims: pd.DataFrame, real: pd.DataFrame, agn_frac: float, r_max
             _, m_r, l_r, h_r = binned(zr[ok], c_real)
             ax.fill_between(x, l_s, h_s, color="C0", alpha=0.25, lw=0)
             ax.plot(x, m_s, color="C0", label=f"simulated AGN (f$_{{AGN,r}}$ > {agn_frac})")
+            if unobscured is not None:
+                u_sel = sel & unobscured
+                _, m_u, l_u, h_u = binned(zs[u_sel], (sim_mag[b1] - sim_mag[b2])[u_sel])
+                ax.fill_between(x, l_u, h_u, color="C2", alpha=0.2, lw=0)
+                ax.plot(x, m_u, color="C2", ls="--", label="simulated, unobscured only")
+                offsets[f"{b1}-{b2} unobsc"] = m_u - m_r
             ax.fill_between(x, l_r, h_r, color="C3", alpha=0.25, lw=0)
             ax.plot(x, m_r, color="C3", label="Milliquas in DP2")
             ax.set_xlabel(r"$z$")
