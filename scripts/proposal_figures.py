@@ -115,7 +115,7 @@ def compute_time(out: Path) -> Path:
             vals = np.array([CATALOGUES[c] * core_sec / 3600 + fixed for c in cats])
             ax.bar(xs, vals, width=width * 0.92, bottom=0, color=colors[j], label=label, zorder=2)
             for x, v in zip(xs, vals):
-                ax.text(x, v * 1.6, f"{sci(v)}\n{fmt_time(v / CLUSTER_CORES)}", ha="center", va="bottom",
+                ax.text(x, v * 1.6, f"{sci(v)}\nCPU hours\n{fmt_time(v / CLUSTER_CORES)}", ha="center", va="bottom",
                         fontsize=8.5, fontweight="bold" if npe else "normal", linespacing=1.15)
         ax.set_yscale("log")
         ax.set_ylim(1e2, 3e10)
@@ -131,9 +131,9 @@ def compute_time(out: Path) -> Path:
         ax.grid(axis="y", color="0.9", lw=0.8, zorder=0)
         for side in ("right", "top"):
             ax.spines[side].set_visible(False)
-        ax.set_ylabel("CPU core-hours", fontsize=11)
+        ax.set_ylabel("CPU hours", fontsize=11)
         ax.legend(loc="upper left", fontsize=8.5, frameon=False)
-        ax.text(1.0, 1.01, f"labels: core-hours, wall-clock time on {CLUSTER_CORES:,} cores", transform=ax.transAxes,
+        ax.text(1.0, 1.01, f"labels: CPU hours, wall-clock time on {CLUSTER_CORES:,} cores", transform=ax.transAxes,
                 ha="right", va="bottom", fontsize=8.5, color="0.35")
         fig.tight_layout()
         fn = out / "compute_time.pdf"
