@@ -236,7 +236,7 @@ def one_shot(out: Path) -> Path:
         box(bx, yb, bw2, 1.05, blue, face="#eef4fb", lw=1.6)
         ax.text(bx, yb + 0.24, "Neural posterior\nestimator", ha="center", va="center", fontsize=9, fontweight="bold",
                 linespacing=1.05)
-        ax.text(bx, yb - 0.26, "one host + AGN population;\nno AGN / galaxy split", ha="center", va="center",
+        ax.text(bx, yb - 0.26, "physics-based galaxy + AGN\nSED models", ha="center", va="center",
                 fontsize=7.5, color="0.3", linespacing=1.1)
         arrow(2.36, bx - bw2 / 2 - 0.03, yb - 0.07, color=blue)
         arrow(bx + bw2 / 2 + 0.03, 5.1, yb, color=blue)
