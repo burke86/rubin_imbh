@@ -3,16 +3,16 @@
 Takes validate_real.py outputs (objects with a reference redshift) or jaxpz predict outputs (no
 reference redshift) and keeps variable objects (all_varSigClip >= --min-sig), de-duplicated by
 objectId. Left panel: host mass against the reference (spectroscopic) redshift where there is one,
-conditioned on it if the table has ``cond_log_stellar_mass_*`` columns (the posterior given the
-data and z = z_spec), else the redshift-marginal posterior; right panel: the marginal posterior
+always conditioned on it (``cond_log_stellar_mass_*`` columns from condition_specz.py: the posterior
+given the data and z = z_spec); right panel: the marginal posterior
 against the photo-z posterior median, as for a catalogue without spectra. Points are coloured by the
 width of their 68% host-mass interval (dex), best constrained on top.
 
 Marginal masses of objects with a catastrophic photo-z follow the wrong redshift.
 
-usage: python scripts/plot_mass_redshift.py data/sims/val_milliquas_v10.parquet \
-           data/sims/val_cosmos-specz_v10.parquet data/sims/val_cdfs-xray_v10.parquet \
-           --out data/sims/plots/mass_redshift_variable_agn_v10.pdf
+usage: python scripts/plot_mass_redshift.py data/sims/val_milliquas_v12_cond.parquet \
+           data/sims/val_cosmos-specz_v12_cond.parquet data/sims/val_cdfs-xray_v12_cond.parquet \
+           --out data/sims/plots/mass_redshift_variable_agn_v12.pdf
 """
 
 from __future__ import annotations
@@ -53,7 +53,10 @@ def main(argv=None):
     d = load(args.tables, args.min_sig)
     x_axes = [("post_redshift_med", r"photo-$z$ (posterior median)", "post")]
     if "ref_z_ref" in d and np.isfinite(d["ref_z_ref"]).any():
-        x_axes.insert(0, ("ref_z_ref", r"$z_{\rm spec}$", "cond" if "cond_log_stellar_mass_med" in d else "post"))
+        if "cond_log_stellar_mass_med" not in d:
+            raise SystemExit("the z_spec panel needs masses conditioned on z_spec: run scripts/condition_specz.py "
+                             "on these tables and plot its *_cond.parquet outputs")
+        x_axes.insert(0, ("ref_z_ref", r"$z_{\rm spec}$", "cond"))
     with use_style():
         fig, axes = plt.subplots(1, len(x_axes), figsize=(6.4 * len(x_axes), 4.6), sharey=True, squeeze=False)
         for ax, (col, label, pre) in zip(axes[0], x_axes):
