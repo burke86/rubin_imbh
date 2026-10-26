@@ -2,7 +2,13 @@
 
 One figure per model: columns are the reference data sets (COSMOS2020, CDF-S X-ray, Milliquas),
 rows are galaxies and AGN. Each panel shows the 1:1 line, the outlier boundary
-|dz|/(1+z) = 0.15, and N, NMAD, outlier fraction and median bias.
+|dz|/(1+z) = 0.15, and N, NMAD, outlier fraction and median bias. Points are coloured by the
+width of their 95% credible interval in units of (1 + z_phot) (the 68% interval for older
+validation files without ``post_redshift_lo95``), with the best constrained on top; a second
+block of statistics covers the well-constrained objects (width below ``--well-constrained``,
+default 0.3, i.e. the interval fits inside the outlier window) and the fraction they make up.
+A second figure, photoz_<model>_kept.pdf, shows the outlier fraction of the objects kept when
+cutting on that width, against the fraction kept.
 
 All references are spectroscopic: COSMOS uses the COSMOS Spectroscopic Redshift Compilation
 (Khostovan et al. 2026; flags 3/4 and broad-line 13/14), CDF-S its spec-z subset, and Milliquas.
@@ -23,6 +29,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.colors import LogNorm  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from jaxsedfit.mplstyle import use_style  # noqa: E402
@@ -32,6 +39,8 @@ DATASETS = [("cosmos-specz", "COSMOS2020", r"$z_{\rm spec}$"),
             ("milliquas", "Milliquas", r"$z_{\rm spec}$")]
 Z_MAX = 4.5
 OUTLIER = 0.15
+WIDTH_NORM = LogNorm(0.03, 3.0)
+WIDTH_CMAP = "viridis_r"
 
 
 def split(ref: str, d: pd.DataFrame) -> dict[str, pd.DataFrame]:
@@ -54,30 +63,48 @@ def metrics(z_ref: np.ndarray, z_phot: np.ndarray) -> dict[str, float]:
             "outlier": np.mean(np.abs(dz) > OUTLIER), "bias": np.median(dz)}
 
 
-def panel(ax, z_ref, z_phot, color):
-    """Density (many objects) or scatter (few) of z_phot vs z_ref, with reference lines and metrics."""
-    if len(z_ref) > 3000:
-        ax.hexbin(z_ref, z_phot, gridsize=70, extent=(0, Z_MAX, 0, Z_MAX), bins="log", mincnt=1, cmap="Greys")
-    elif len(z_ref):
-        ax.scatter(z_ref, z_phot, s=6, alpha=0.6, color=color, lw=0)
+def ci_width(d: pd.DataFrame) -> tuple[np.ndarray, str]:
+    """Redshift credible-interval width / (1 + z_phot): 95% if available, else 68%, and its label."""
+    med = d["post_redshift_med"].to_numpy(float)
+    if "post_redshift_lo95" in d:
+        return (d["post_redshift_hi95"] - d["post_redshift_lo95"]).to_numpy(float) / (1 + med), "95%"
+    return (d["post_redshift_hi"] - d["post_redshift_lo"]).to_numpy(float) / (1 + med), "68%"
+
+
+def panel(ax, z_ref, z_phot, width, ci_label, well):
+    """z_phot vs z_ref coloured by credible-interval width, with reference lines and metrics for all
+    objects and for the well-constrained ones (width < ``well``). Returns the scatter artist."""
+    art = None
+    if len(z_ref):
+        order = np.argsort(-np.nan_to_num(width, nan=np.inf))  # best constrained drawn last, on top
+        art = ax.scatter(z_ref[order], z_phot[order], c=np.clip(width[order], WIDTH_NORM.vmin, WIDTH_NORM.vmax),
+                         s=3 if len(z_ref) > 3000 else 8, lw=0, cmap=WIDTH_CMAP, norm=WIDTH_NORM, rasterized=True)
     grid = np.linspace(0, Z_MAX, 50)
     ax.plot(grid, grid, color="k", lw=0.8)
     for sign in (-1, 1):
         ax.plot(grid, grid + sign * OUTLIER * (1 + grid), color="k", lw=0.6, ls="--")
     if len(z_ref):
         m = metrics(z_ref, z_phot)
-        ax.text(0.04, 0.96, f"N = {m['n']}\nNMAD = {m['nmad']:.3f}\noutliers = {100 * m['outlier']:.1f}%\n"
-                f"bias = {m['bias']:+.3f}", transform=ax.transAxes, va="top", ha="left", fontsize=11,
+        text = (f"N = {m['n']}\nNMAD = {m['nmad']:.3f}\noutliers = {100 * m['outlier']:.1f}%\n"
+                f"bias = {m['bias']:+.3f}")
+        good = width < well
+        if good.sum() >= 5:
+            g = metrics(z_ref[good], z_phot[good])
+            text += (f"\n\n{ci_label} CI < {well:g}(1+z): {100 * good.mean():.0f}%\n"
+                     f"NMAD = {g['nmad']:.3f}\noutliers = {100 * g['outlier']:.1f}%")
+        ax.text(0.04, 0.96, text, transform=ax.transAxes, va="top", ha="left", fontsize=10,
                 bbox=dict(facecolor="white", edgecolor="none", alpha=0.8))
     ax.set_xlim(0, Z_MAX)
     ax.set_ylim(0, Z_MAX)
     ax.set_aspect("equal")
+    return art
 
 
-def plot_model(val_dir: Path, model: str, out: Path) -> Path:
+def plot_model(val_dir: Path, model: str, out: Path, well: float = 0.3) -> Path:
     """Write the galaxies/AGN x data set figure for one model and return its path."""
+    art, ci_label = None, "95%"
     with use_style():
-        fig, axes = plt.subplots(2, len(DATASETS), figsize=(4.6 * len(DATASETS), 9.6), sharex=True, sharey=True)
+        fig, axes = plt.subplots(2, len(DATASETS), figsize=(4.6 * len(DATASETS) + 1.0, 9.6), sharex=True, sharey=True)
         for j, (ref, title, ref_label) in enumerate(DATASETS):
             path = val_dir / f"val_{ref}_{model}.parquet"
             parts = split(ref, pd.read_parquet(path)) if path.exists() else {}
@@ -91,16 +118,58 @@ def plot_model(val_dir: Path, model: str, out: Path) -> Path:
                     ax.set_ylim(0, Z_MAX)
                     ax.set_aspect("equal")
                 else:
-                    panel(ax, sub["ref_z_ref"].to_numpy(float), sub["post_redshift_med"].to_numpy(float), color)
+                    width, ci_label = ci_width(sub)
+                    art = panel(ax, sub["ref_z_ref"].to_numpy(float), sub["post_redshift_med"].to_numpy(float),
+                                width, ci_label, well) or art
                 if i == 0:
                     ax.set_title(title)
                 if i == 1:
                     ax.set_xlabel(ref_label)
                 if j == 0:
                     ax.set_ylabel(rf"{cls}: $z_{{\rm phot}}$")
-        fig.tight_layout()
+        fig.tight_layout(rect=(0, 0, 0.93, 1))
+        if art is not None:
+            cax = fig.add_axes((0.94, 0.25, 0.015, 0.5))
+            fig.colorbar(art, cax=cax, label=rf"{ci_label} credible interval / $(1+z_{{\rm phot}})$")
         out.mkdir(parents=True, exist_ok=True)
         fn = out / f"photoz_{model}.pdf"
+        fig.savefig(fn)
+        plt.close(fig)
+    return fn
+
+
+def plot_kept(val_dir: Path, model: str, out: Path, well: float = 0.3) -> Path:
+    """Outlier fraction and NMAD of the objects kept when cutting on credible-interval width, against
+    the fraction kept (galaxies and AGN panels, one line per data set; dots mark ``well``)."""
+    with use_style():
+        fig, axes = plt.subplots(1, 2, figsize=(10.4, 4.6), sharey=True)
+        for j, (ref, title, _) in enumerate(DATASETS):
+            path = val_dir / f"val_{ref}_{model}.parquet"
+            if not path.exists():
+                continue
+            for ax, (cls, sub) in zip(axes, split(ref, pd.read_parquet(path)).items()):
+                if len(sub) < 20:
+                    continue
+                width, ci_label = ci_width(sub)
+                zr, zp = sub["ref_z_ref"].to_numpy(float), sub["post_redshift_med"].to_numpy(float)
+                order = np.argsort(width)
+                out_flag = (np.abs(zp - zr) / (1 + zr) > OUTLIER)[order]
+                n = np.arange(1, len(order) + 1)
+                kept, frac_out = n / len(order), np.cumsum(out_flag) / n
+                ax.plot(kept, frac_out, color=f"C{j}", label=title)
+                k = int(np.sum(width < well))
+                if k:
+                    ax.plot(kept[k - 1], frac_out[k - 1], "o", color=f"C{j}")
+        for ax, cls in zip(axes, ("galaxies", "AGN")):
+            ax.set_title(cls)
+            ax.set_xlabel(f"fraction kept (narrowest {ci_label} CI first)")
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, None)
+        axes[0].set_ylabel("outlier fraction of kept objects")
+        axes[1].legend(fontsize=10, loc="upper left")
+        fig.tight_layout()
+        out.mkdir(parents=True, exist_ok=True)
+        fn = out / f"photoz_{model}_kept.pdf"
         fig.savefig(fn)
         plt.close(fig)
     return fn
@@ -191,9 +260,12 @@ def main(argv=None):
     p.add_argument("--out", default="data/sims/plots")
     p.add_argument("--masses", default="data/cosmos_specz_lephare_masses.parquet",
                    help="COSMOS fixed-spec-z LePhare masses (ra, dec, z_spec, is_bl_agn, logM_ref) for mass_<model>.pdf")
+    p.add_argument("--well-constrained", type=float, default=0.3,
+                   help="credible-interval width / (1 + z) below which an object counts as well constrained")
     args = p.parse_args(argv)
     for model in args.model:
-        print(plot_model(Path(args.val_dir), model, Path(args.out)))
+        print(plot_model(Path(args.val_dir), model, Path(args.out), args.well_constrained))
+        print(plot_kept(Path(args.val_dir), model, Path(args.out), args.well_constrained))
         print(plot_mass(Path(args.val_dir), model, Path(args.masses), Path(args.out)))
 
 
