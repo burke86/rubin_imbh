@@ -51,7 +51,7 @@ def main(argv=None):
         d["cond_ess"] = ess
         out = path.with_name(f"{path.stem}{args.suffix}.parquet")
         d.to_parquet(out)
-        print(f"{out}: {len(d)} variable objects, median ESS near z_spec {np.median(ess):.0f}, "
+        print(f"{out}: {len(d)} objects (all_varSigClip >= {args.min_sig:g}), median ESS near z_spec {np.median(ess):.0f}, "
               f"{100 * np.mean(ess < args.min_ess):.1f}% without an estimate")
 
 
