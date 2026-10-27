@@ -106,7 +106,7 @@ def main(argv=None):
         ax2.set_xticks([0, 1, 2, 3])
         ax2.tick_params(labelsize=8)
         ax2.set_xlabel(r"redshift", fontsize=9)
-        ax2.set_ylabel(r"host $\log M_\star^{\rm jaxpz}$", fontsize=9)
+        ax2.set_ylabel(r"$\log M_\star^{\rm jaxpz}$", fontsize=9)
         fig.tight_layout(w_pad=0.8)
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
