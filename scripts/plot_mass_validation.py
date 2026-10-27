@@ -69,7 +69,7 @@ def main(argv=None):
     nmad = 1.4826 * np.median(np.abs(resid - off))
     out_frac = np.mean(np.abs(resid) > OUTLIER_DEX)
     with use_style():
-        fig, (ax, ax2) = plt.subplots(1, 2, figsize=(7.2, 2.9))
+        fig, (ax, ax2) = plt.subplots(1, 2, figsize=(8.4, 2.9))
         *_, art = ax.hist2d(ref, resid, bins=(np.linspace(*MASS_RANGE, 91), np.linspace(*RESID_RANGE, 61)),
                             norm=LogNorm(vmin=1), cmap="magma_r", rasterized=True)
         ax.axhline(0, color="k", lw=0.6, ls=":")
