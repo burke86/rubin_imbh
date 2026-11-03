@@ -31,7 +31,8 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from jaxpz.observables import real_observables  # noqa: E402
 from rubin_imbh.references import (  # noqa: E402
-    cdfs_xray_reference, cosmos2020_reference, cosmos_specz_reference, match_reference, milliquas_reference)
+    cdfs_xray_reference, cosmos2020_reference, cosmos_specz_reference, desi_reference, match_reference,
+    milliquas_reference)
 
 MAG_BINS = [-np.inf, 21, 22, 23, 24, 25.5]
 
@@ -52,7 +53,7 @@ def main(argv=None):
     p.add_argument("--flux-template", default="{b}_psfFlux")
     p.add_argument("--err-template", default="{b}_psfFluxErr")
     p.add_argument("--reference", required=True,
-                   help="cosmos2020 (photo-z), cosmos-specz (spectroscopic compilation), cdfs-xray, milliquas (spectroscopic quasars/AGN), or a parquet file with ra, dec, z_ref, z_type (and optionally logLX, is_xray_agn)")
+                   help="cosmos2020 (photo-z), cosmos-specz (spectroscopic compilation), cdfs-xray, milliquas (spectroscopic quasars/AGN), desi (DESI DR1 galaxies and AGN, scripts/desi_reference.py), or a parquet file with ra, dec, z_ref, z_type (and optionally logLX, is_xray_agn)")
     p.add_argument("--cosmos2020", default="data/cosmos2020_classic_zr.parquet")
     p.add_argument("--cosmos-specz", default="data/cosmos_specz_DR1.1_unique.fits",
                    help="COSMOS spectroscopic redshift compilation (DR1.1 unique file) for --reference cosmos-specz")
@@ -93,6 +94,8 @@ def main(argv=None):
         ref = cdfs_xray_reference()
     elif args.reference == "milliquas":
         ref = milliquas_reference()
+    elif args.reference == "desi":
+        ref = desi_reference()
     else:
         ref = pd.read_parquet(Path(args.reference).expanduser())
     obs = match_reference(obs, ref, args.match_arcsec)
@@ -148,6 +151,15 @@ def main(argv=None):
         for name, m in (("extended", ~obs["pointlike"].to_numpy(bool) & (obs["refExtendedness"].to_numpy(float) >= 0.5)),
                         ("point-like, not a Gaia star", obs["pointlike"].to_numpy(bool))):
             print(f"{name}: ", {k: round(v, 3) for k, v in photoz_metrics(obs["post_redshift_med"].to_numpy()[m], zref[m]).items()})
+    if "z_ambiguous" in obs:
+        amb = obs["z_ambiguous"].to_numpy(bool)
+        groups = [("all", np.ones(len(obs), bool))]
+        if "pointlike" in obs:
+            groups.append(("point-like", obs["pointlike"].to_numpy(bool)))
+        for name, m in groups:
+            for flag, sel in (("unambiguous", m & ~amb), ("ambiguous", m & amb)):
+                print(f"{name} {flag} ({sel.sum() / max(m.sum(), 1):.0%}): ",
+                      {k: round(v, 3) for k, v in photoz_metrics(obs["post_redshift_med"].to_numpy()[sel], zref[sel]).items()})
     if "ref_z_type" in obs:
         spec = obs["ref_z_type"].astype(str).eq("spec").to_numpy()
         if spec.sum() >= 5:

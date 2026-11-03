@@ -1,7 +1,7 @@
 """Photo-z vs reference redshift for validate_real.py outputs, galaxies and AGN in separate panels.
 
-One figure per model: columns are the reference data sets (COSMOS2020, CDF-S X-ray, Milliquas),
-rows are galaxies and AGN. Each panel shows the 1:1 line, the outlier boundary
+One figure per model: columns are the reference samples, rows are galaxies and AGN. By default the
+columns are the DDFs (COSMOS and CDF-S pooled) and DESI DR1; --columns picks others (see COLUMNS). Each panel shows the 1:1 line, the outlier boundary
 |dz|/(1+z) = 0.15, and N, NMAD, outlier fraction and median bias. Points are coloured by the
 width of their 95% credible interval in units of (1 + z_phot) (the 68% interval for older
 validation files without ``post_redshift_lo95``), with the best constrained on top; a second
@@ -11,13 +11,15 @@ A second figure, photoz_<model>_kept.pdf, shows the outlier fraction of the obje
 cutting on that width, against the fraction kept.
 
 All references are spectroscopic: COSMOS uses the COSMOS Spectroscopic Redshift Compilation
-(Khostovan et al. 2026; flags 3/4 and broad-line 13/14), CDF-S its spec-z subset, and Milliquas.
+(Khostovan et al. 2026; flags 3/4 and broad-line 13/14), CDF-S its spec-z subset, DESI DR1 the AGN/galaxy
+value-added catalog (scripts/desi_reference.py), and Milliquas.
 AGN labels: COSMOS broad-line objects plus variable (all_varSigClip >= 5) or Gaia QSO sources;
-the CDF-S X-ray catalogue's AGN classification; every Milliquas source is an AGN.
+the CDF-S X-ray catalog's AGN classification; DESI Redrock QSOs plus broad-line galaxies; every
+Milliquas source is an AGN.
 
 usage: python scripts/plot_photoz.py --val-dir data/sims --model v6c [--model v6w ...] --out data/sims/plots
 
-Needs validate_real.py outputs val_<reference>_<model>.parquet for cosmos-specz, cdfs-xray and milliquas.
+Needs validate_real.py outputs val_<reference>_<model>.parquet for the references in the chosen columns.
 """
 
 from __future__ import annotations
@@ -34,9 +36,11 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from jaxsedfit.mplstyle import use_style  # noqa: E402
 
-DATASETS = [("cosmos-specz", "COSMOS2020", r"$z_{\rm spec}$"),
-            ("cdfs-xray", "CDF-S", r"$z_{\rm spec}$"),
-            ("milliquas", "Milliquas", r"$z_{\rm spec}$")]
+# column key: (title, validation references pooled into the column)
+COLUMNS = {"ddf": ("DDFs", ("cosmos-specz", "cdfs-xray")), "desi": ("DESI DR1", ("desi",)),
+           "cosmos": ("COSMOS2020", ("cosmos-specz",)), "cdfs": ("CDF-S", ("cdfs-xray",)),
+           "milliquas": ("Milliquas", ("milliquas",))}
+DEFAULT_COLUMNS = ("ddf", "desi")
 Z_MAX = 4.5
 OUTLIER = 0.15
 WIDTH_NORM = LogNorm(0.03, 3.0)
@@ -50,10 +54,23 @@ def split(ref: str, d: pd.DataFrame) -> dict[str, pd.DataFrame]:
         agn = d["ref_is_xray_agn"].astype(bool)
     elif ref == "milliquas":
         agn = pd.Series(True, index=d.index)
+    elif ref == "desi":
+        agn = d["ref_is_agn"].astype(bool)
     else:
         variable = (d["all_varSigClip"] >= 5) | d["gaia_qso"].fillna(False).astype(bool)
         agn = variable | d["ref_is_bl_agn"].astype(bool) if "ref_is_bl_agn" in d else variable
     return {"galaxies": d[~agn], "AGN": d[agn]}
+
+
+def load_column(val_dir: Path, model: str, refs) -> dict[str, pd.DataFrame]:
+    """Galaxy and AGN subsets pooled over the validation tables of ``refs`` ({} if none exist)."""
+    parts = {}
+    for ref in refs:
+        path = val_dir / f"val_{ref}_{model}.parquet"
+        if path.exists():
+            for cls, sub in split(ref, pd.read_parquet(path)).items():
+                parts.setdefault(cls, []).append(sub)
+    return {cls: pd.concat(subs, ignore_index=True) for cls, subs in parts.items()}
 
 
 def metrics(z_ref: np.ndarray, z_phot: np.ndarray) -> dict[str, float]:
@@ -100,19 +117,21 @@ def panel(ax, z_ref, z_phot, width, ci_label, well):
     return art
 
 
-def plot_model(val_dir: Path, model: str, out: Path, well: float = 0.3) -> Path:
-    """Write the galaxies/AGN x data set figure for one model and return its path."""
+def plot_model(val_dir: Path, model: str, out: Path, well: float = 0.3, columns=DEFAULT_COLUMNS) -> Path:
+    """Write the galaxies/AGN x reference-sample figure for one model and return its path."""
     art, ci_label = None, "95%"
     with use_style():
-        fig, axes = plt.subplots(2, len(DATASETS), figsize=(4.6 * len(DATASETS) + 1.0, 9.6), sharex=True, sharey=True)
-        for j, (ref, title, ref_label) in enumerate(DATASETS):
-            path = val_dir / f"val_{ref}_{model}.parquet"
-            parts = split(ref, pd.read_parquet(path)) if path.exists() else {}
+        fig, axes = plt.subplots(2, len(columns), figsize=(4.6 * len(columns) + 1.0, 9.6), sharex=True, sharey=True,
+                                 squeeze=False)
+        for j, key in enumerate(columns):
+            title, refs = COLUMNS[key]
+            ref_label = r"$z_{\rm spec}$"
+            parts = load_column(val_dir, model, refs)
             for i, (cls, color) in enumerate([("galaxies", "C0"), ("AGN", "C3")]):
                 ax = axes[i, j]
                 sub = parts.get(cls)
                 if sub is None or not len(sub):
-                    reason = "no file" if not parts else ("all sources\nare AGN" if ref == "milliquas" else "none")
+                    reason = "no file" if not parts else ("all sources\nare AGN" if refs == ("milliquas",) else "none")
                     ax.text(0.5, 0.5, reason, transform=ax.transAxes, ha="center", va="center", color="0.5")
                     ax.set_xlim(0, Z_MAX)
                     ax.set_ylim(0, Z_MAX)
@@ -138,17 +157,17 @@ def plot_model(val_dir: Path, model: str, out: Path, well: float = 0.3) -> Path:
     return fn
 
 
-def plot_kept(val_dir: Path, model: str, out: Path, well: float = 0.3) -> Path:
+def plot_kept(val_dir: Path, model: str, out: Path, well: float = 0.3, columns=DEFAULT_COLUMNS) -> Path:
     """Outlier fraction and NMAD of the objects kept when cutting on credible-interval width, against
     the fraction kept (galaxies and AGN panels, one line per data set; dots mark ``well``)."""
     with use_style():
         fig, axes = plt.subplots(1, 2, figsize=(10.4, 4.6), sharey=True)
-        for j, (ref, title, _) in enumerate(DATASETS):
-            path = val_dir / f"val_{ref}_{model}.parquet"
-            if not path.exists():
-                continue
-            for ax, (cls, sub) in zip(axes, split(ref, pd.read_parquet(path)).items()):
-                if len(sub) < 20:
+        for j, key in enumerate(columns):
+            title, refs = COLUMNS[key]
+            parts = load_column(val_dir, model, refs)
+            for ax, cls in zip(axes, ("galaxies", "AGN")):
+                sub = parts.get(cls)
+                if sub is None or len(sub) < 20:
                     continue
                 width, ci_label = ci_width(sub)
                 zr, zp = sub["ref_z_ref"].to_numpy(float), sub["post_redshift_med"].to_numpy(float)
@@ -260,12 +279,15 @@ def main(argv=None):
     p.add_argument("--out", default="data/sims/plots")
     p.add_argument("--masses", default="data/cosmos_specz_lephare_masses.parquet",
                    help="COSMOS fixed-spec-z LePhare masses (ra, dec, z_spec, is_bl_agn, logM_ref) for mass_<model>.pdf")
+    p.add_argument("--columns", default=",".join(DEFAULT_COLUMNS),
+                   help=f"comma-separated figure columns, from {', '.join(COLUMNS)}")
     p.add_argument("--well-constrained", type=float, default=0.3,
                    help="credible-interval width / (1 + z) below which an object counts as well constrained")
     args = p.parse_args(argv)
     for model in args.model:
-        print(plot_model(Path(args.val_dir), model, Path(args.out), args.well_constrained))
-        print(plot_kept(Path(args.val_dir), model, Path(args.out), args.well_constrained))
+        cols = tuple(c.strip() for c in args.columns.split(",") if c.strip())
+        print(plot_model(Path(args.val_dir), model, Path(args.out), args.well_constrained, cols))
+        print(plot_kept(Path(args.val_dir), model, Path(args.out), args.well_constrained, cols))
         print(plot_mass(Path(args.val_dir), model, Path(args.masses), Path(args.out)))
 
 

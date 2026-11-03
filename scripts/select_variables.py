@@ -97,6 +97,16 @@ def build_prefilter(args) -> str | None:
     return " and ".join(f"({p})" for p in parts) or None
 
 
+def load_object_ids(args):
+    """objectIds from --object-ids (a parquet with an objectId column, e.g. from match_targets.py), or None."""
+    if not args.object_ids:
+        return None
+    if not hasattr(args, "_ids"):
+        args._ids = pd.read_parquet(Path(args.object_ids).expanduser(), columns=["objectId"])["objectId"].to_numpy()
+        logging.info("restricting to %d objectIds from %s", len(args._ids), args.object_ids)
+    return args._ids
+
+
 def cmd_run(args):
     cols = build_columns(args)
     cuts = Cuts(
@@ -161,6 +171,15 @@ def cmd_run(args):
             skipped = [t for t, bb in zip(tiles, b) if abs(bb) < args.min_abs_b]
             tiles = [t for t, bb in zip(tiles, b) if abs(bb) >= args.min_abs_b]
             logging.info("skipping %d tiles with |b| < %g deg at their centre: %s", len(skipped), args.min_abs_b, skipped)
+        if args.object_ids:
+            import astropy.units as u
+            import cdshealpix.nested as cn
+
+            pos = pd.read_parquet(Path(args.object_ids).expanduser(), columns=["coord_ra", "coord_dec"])
+            have = set(cn.lonlat_to_healpix(pos["coord_ra"].to_numpy() * u.deg, pos["coord_dec"].to_numpy() * u.deg,
+                                            args.tile_order).tolist())
+            tiles = [t for t in tiles if t in have]
+            logging.info("%d tiles contain --object-ids Objects", len(tiles))
         out.mkdir(parents=True, exist_ok=True)
         todo = [p for p in tiles if not (out / f"o{args.tile_order}_p{p}" / DONE).exists()]
         logging.info("%d tiles, %d already done, %d to run", len(tiles), len(tiles) - len(todo), len(todo))
@@ -245,6 +264,7 @@ def run_one(cat, cols, cuts, args, dest: Path, tile, env=None):
     written last so an interrupted tile is redone on the next run.
     """
     result = select_variables(cat, cols, cuts, select=not args.no_select, tile=tile, prefilter=build_prefilter(args),
+                              object_ids=load_object_ids(args),
                               chunk_objects=args.chunk_objects)
     if args.no_select or args.stats_only:
         result = result[[c for c in result.columns if c not in cat.nested_columns]]
@@ -315,6 +335,8 @@ def main(argv=None):
     r.add_argument("--stats-only", action="store_true", help="drop the nested light curves from the output")
     r.add_argument("--prefilter", help="pandas query on top-level columns before any light curve is read, "
                    "e.g. 'r_psfFlux > 1000' (object source: host selection)")
+    r.add_argument("--object-ids", help="parquet with an objectId column (e.g. from match_targets.py): keep only "
+                   "those Objects; with --tile-order, tiles without any are skipped")
     r.add_argument("--extended-only", action="store_true", help="add refExtendedness >= 0.5 to the prefilter")
     r.add_argument("--keep-dia-source", action="store_true", help="dia source: also keep the nested diaSource column")
     r.add_argument("--keep-columns", help="comma-separated extra top-level columns to carry into the output "

@@ -5,3 +5,4 @@ dask-worker-space/
 *.parquet
 dp2_variables/
 models/
+data/*.csv

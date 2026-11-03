@@ -77,6 +77,11 @@ def milliquas_reference(cache="data/milliquas.parquet") -> pd.DataFrame:
                          "is_xray_agn": False})
 
 
+def desi_reference(path="data/desi_dr1_reference.parquet") -> pd.DataFrame:
+    """DESI DR1 galaxies and AGN from scripts/desi_reference.py (ra, dec, z_ref, z_type, is_agn, ...)."""
+    return pd.read_parquet(Path(path).expanduser()).drop(columns=["targetid"], errors="ignore")
+
+
 def match_reference(objects: pd.DataFrame, ref: pd.DataFrame, radius_arcsec: float = 1.0,
                     ra: str = "coord_ra", dec: str = "coord_dec") -> pd.DataFrame:
     """Nearest reference within ``radius_arcsec`` for each object (columns prefixed ``ref_``)."""

@@ -143,16 +143,22 @@ def _apply_prefilter(df, expr: str):
     return df.iloc[np.flatnonzero(mask)]
 
 
+def _keep_ids(df, ids, column: str = "objectId"):
+    """Rows whose ``column`` is in ``ids``."""
+    return df.iloc[np.flatnonzero(df[column].isin(ids).to_numpy())]
+
+
 def select_variables(
     catalog, cols: Columns = Columns(), cuts: Cuts = Cuts(), select: bool = True, tile=None,
-    prefilter: str | None = None, chunk_objects: int = CHUNK_OBJECTS,
+    prefilter: str | None = None, chunk_objects: int = CHUNK_OBJECTS, object_ids=None,
 ):
     """Lazy LSDB pipeline: cheap row cuts, then light-curve statistics per partition.
 
     ``prefilter`` is a pandas query on top-level columns (e.g. host selection such as
     ``"refExtendedness >= 0.5"``); for DIA catalogs ``nDiaSources >= min_dia_sources`` is
     applied as well. ``tile = (order, pixel)`` restricts the run to one HEALPix pixel, so a
-    full-sky run can be split into independently restartable pieces.
+    full-sky run can be split into independently restartable pieces. ``object_ids`` keeps only those
+    Objects (e.g. matches to a spectroscopic target list), before any light curve is processed.
     """
     cols = resolve_columns(catalog, cols)
     if tile is not None:
@@ -162,6 +168,9 @@ def select_variables(
         # an explicit mask instead of catalog.query: same result, and it avoids nested-pandas'
         # label-based .loc, which failed on a DP2 COSMOS partition
         coarse = coarse.map_partitions(_apply_prefilter, expr=prefilter, meta=coarse.meta if hasattr(coarse, "meta") else coarse._ddf._meta)
+    if object_ids is not None:
+        ids = np.unique(np.asarray(object_ids))
+        coarse = coarse.map_partitions(_keep_ids, ids=ids, meta=coarse.meta if hasattr(coarse, "meta") else coarse._ddf._meta)
     if cols.n_dia_sources is not None:
         coarse = coarse.query(f"{cols.n_dia_sources} >= {cuts.min_dia_sources}")
     kw = dict(cols=cols, cuts=cuts, select=select, tile=tile, chunk_objects=chunk_objects)

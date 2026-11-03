@@ -335,6 +335,9 @@ def test_object_source_end_to_end():
         assert set(res.objectId) == truth  # no DIA-count cut: every Object is tested
         ext = select_variables(cat, OBJECT, Cuts(), prefilter="refExtendedness >= 0.5").compute()
         assert set(ext.objectId) == set(nf.objectId[nf.truth_var & (nf.refExtendedness >= 0.5)])
+        ids = nf.objectId.to_numpy()[::3]
+        sub = select_variables(cat, OBJECT, Cuts(), select=False, object_ids=ids).compute()
+        assert set(sub.objectId) == set(ids)  # only the listed Objects get statistics
 
         if "how" not in inspect.signature(lsdb.catalog.Catalog.crossmatch).parameters:
             print("  (bright-star part skipped: needs lsdb >= 0.10)")
