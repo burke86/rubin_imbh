@@ -56,9 +56,11 @@ def parse_sys_frac(text: str):
     return {k.strip(): float(v) for k, v in (item.split("=") for item in text.split(","))}
 
 
-def open_dia(path: str, cone=None, columns=None):
+def open_dia(path: str, cone=None, columns=None, ids=None):
     search = lsdb.ConeSearch(ra=cone[0], dec=cone[1], radius_arcsec=cone[2]) if cone else None
-    return lsdb.open_catalog(UPath(path), search_filter=search, columns=columns)
+    # filter rows while the parquet is read, so a dense partition never holds every light curve at once
+    kw = {"filters": [("objectId", "in", np.unique(ids).tolist())]} if ids is not None else {}
+    return lsdb.open_catalog(UPath(path), search_filter=search, columns=columns, **kw)
 
 
 def cmd_inspect(args):
@@ -152,7 +154,7 @@ def cmd_run(args):
             extra = extra + tuple(c for c in want if c not in missing)
         columns = needed_columns(open_dia(args.catalog), cols, extra, keep_lc=not (args.stats_only or args.no_select))
         logging.info("loading columns: %s", columns)
-        cat = open_dia(args.catalog, args.cone, columns)
+        cat = open_dia(args.catalog, args.cone, columns, ids=load_object_ids(args))
         out = Path(args.out).expanduser()
         if args.source == "object":
             env = None if args.no_veto else load_environment(args, out, args.catalog)

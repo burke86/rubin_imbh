@@ -338,6 +338,12 @@ def test_object_source_end_to_end():
         ids = nf.objectId.to_numpy()[::3]
         sub = select_variables(cat, OBJECT, Cuts(), select=False, object_ids=ids).compute()
         assert set(sub.objectId) == set(ids)  # only the listed Objects get statistics
+        pre = lsdb.open_catalog(Path(tmp) / "obj", columns=columns, filters=[("objectId", "in", ids.tolist())])
+        early = select_variables(pre, OBJECT, Cuts(), select=False, object_ids=ids).compute()
+        assert set(early.objectId) == set(ids)  # filtering at read time gives the same Objects
+        cols_cmp = [c for c in sub.columns if c.startswith(("r_var", "objectId"))]
+        pd.testing.assert_frame_equal(early.sort_values("objectId")[cols_cmp].reset_index(drop=True),
+                                      sub.sort_values("objectId")[cols_cmp].reset_index(drop=True))
 
         if "how" not in inspect.signature(lsdb.catalog.Catalog.crossmatch).parameters:
             print("  (bright-star part skipped: needs lsdb >= 0.10)")
