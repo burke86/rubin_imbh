@@ -185,15 +185,27 @@ def cmd_run(args):
         out.mkdir(parents=True, exist_ok=True)
         todo = [p for p in tiles if not (out / f"o{args.tile_order}_p{p}" / DONE).exists()]
         logging.info("%d tiles, %d already done, %d to run", len(tiles), len(tiles) - len(todo), len(todo))
+        from distributed.scheduler import KilledWorker
+
         t_start = time.time()
+        failed = []
         for i, pix in enumerate(todo, 1):
             dest = out / f"o{args.tile_order}_p{pix}"
             t0 = time.time()
             logging.info("[%d/%d] %s", i, len(todo), dest.name)
-            run_one(cat, cols, cuts, args, dest, (args.tile_order, pix), env)
+            try:
+                run_one(cat, cols, cuts, args, dest, (args.tile_order, pix), env)
+            except KilledWorker:
+                # a dense tile can exceed the worker memory; leave it undone and rerun it alone with
+                # fewer, larger workers (--tile ORDER PIXEL --n-workers 1 --memory-limit ...)
+                logging.error("%s: workers ran out of memory; skipped", dest.name)
+                failed.append(pix)
+                continue
             per = (time.time() - t_start) / i
             logging.info("[%d/%d] %s took %.0f s; mean %.0f s/tile, ~%.1f h remaining",
                          i, len(todo), dest.name, time.time() - t0, per, per * (len(todo) - i) / 3600)
+        if failed:
+            logging.error("%d tiles failed (rerun each with --tile %d PIXEL): %s", len(failed), args.tile_order, failed)
 
 
 DONE = "_DONE"
